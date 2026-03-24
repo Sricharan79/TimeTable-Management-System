@@ -22,13 +22,11 @@ The Time Table Management System is a web-based application designed to efficien
 ---
 
 ## 📂 Project Structure
-time-table-project/
+TimeTable-Management-System/
 │
-├── frontend/        
-├── backend/         
-├── database/        
+├── frontend/        ← React timetable auto generator
 ├── README.md
-└── package.json
+└── (optional) backend & database folders
 
 ---
 
@@ -38,11 +36,12 @@ time-table-project/
 git clone https://github.com/Sricharan79/TimeTable-Management-System.git
 cd TimeTable-Management-System
 
-### Install Dependencies
+### Install Dependencies (React frontend)
+cd frontend
 npm install
 
-### Run the Project
-npm start
+### Run the React Frontend
+npm run dev
 
 ---
 
