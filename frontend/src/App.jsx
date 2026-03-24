@@ -1,12 +1,12 @@
 import React, { useMemo, useState } from 'react';
 
 const defaultDays = [
-  { id: 'mon', label: 'Monday', enabled: true },
-  { id: 'tue', label: 'Tuesday', enabled: true },
-  { id: 'wed', label: 'Wednesday', enabled: true },
-  { id: 'thu', label: 'Thursday', enabled: true },
-  { id: 'fri', label: 'Friday', enabled: true },
-  { id: 'sat', label: 'Saturday', enabled: false },
+  { id: 'Mon', label: 'Monday', enabled: true },
+  { id: 'Tue', label: 'Tuesday', enabled: true },
+  { id: 'Wed', label: 'Wednesday', enabled: true },
+  { id: 'Thu', label: 'Thursday', enabled: true },
+  { id: 'Fri', label: 'Friday', enabled: true },
+  { id: 'Sat', label: 'Saturday', enabled: false },
 ];
 
 const emptySubjectRow = (id) => ({ id, name: '', faculty: '', sessions: 1 });
@@ -295,7 +295,7 @@ export default function App() {
     <div className="app-root">
       <header className="app-header">
         <div>
-          <h1>University Timetable Auto Generator</h1>
+          <h1>Aurora University Timetable </h1>
           <p className="subtitle">Configure your rules and generate a clean, printable timetable.</p>
         </div>
       </header>
@@ -402,7 +402,7 @@ export default function App() {
                       <td>
                         <input
                           type="text"
-                          placeholder="e.g., Constitutional Law I"
+                          placeholder="Course"
                           value={subject.name}
                           onChange={(e) => handleSubjectChange(subject.id, 'name', e.target.value)}
                         />
@@ -410,7 +410,7 @@ export default function App() {
                       <td>
                         <input
                           type="text"
-                          placeholder="e.g., Dr. Sharma"
+                          placeholder="name"
                           value={subject.faculty || ''}
                           onChange={(e) => handleSubjectChange(subject.id, 'faculty', e.target.value)}
                         />
