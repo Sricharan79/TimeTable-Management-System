@@ -24,9 +24,10 @@ The Time Table Management System is a web-based application designed to efficien
 ## 📂 Project Structure
 TimeTable-Management-System/
 │
-├── frontend/        ← React timetable auto generator
+├── frontend/        ← React timetable auto generator (Vite + React)
+├── backend/         ← Node + Express API for timetable generation
 ├── README.md
-└── (optional) backend & database folders
+└── (optional) database/ and other folders
 
 ---
 
@@ -41,6 +42,13 @@ cd frontend
 npm install
 
 ### Run the React Frontend
+npm run dev
+
+### Install Dependencies (Node backend)
+cd ../backend
+npm install
+
+### Run the Backend API
 npm run dev
 
 ---
