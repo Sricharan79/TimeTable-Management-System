@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import API from '../services/api';
 import auroraLogo from '../assets/image.png';
 import './styles.css';
@@ -20,11 +20,11 @@ function GeneratorPage() {
   });
 
   const [timetable, setTimetable] = useState({});
-  const [uploadEntity, setUploadEntity] = useState('subject');
   const [uploadFile, setUploadFile] = useState(null);
   const [uploadMessage, setUploadMessage] = useState('');
   const [uploadError, setUploadError] = useState('');
   const [isUploading, setIsUploading] = useState(false);
+  const fileInputRef = useRef(null);
 
   // ================= LOAD DEPARTMENTS =================
   useEffect(() => {
@@ -127,7 +127,7 @@ function GeneratorPage() {
 
       const formData = new FormData();
       formData.append('file', uploadFile);
-      formData.append('entity', uploadEntity);
+      formData.append('entity', 'mixed');
 
       if (selected.departmentId) formData.append('departmentId', selected.departmentId);
       if (selected.courseId) formData.append('courseId', selected.courseId);
@@ -143,6 +143,9 @@ function GeneratorPage() {
         `Imported ${response.data.importedCount} row(s). Skipped ${response.data.skippedCount} row(s).`
       );
       setUploadFile(null);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
     } catch (error) {
       setUploadError(error.response?.data?.error || 'Upload failed. Please check file format and data columns.');
     } finally {
@@ -230,27 +233,29 @@ function GeneratorPage() {
         </div>
 
         <div className="upload-panel">
-          <h3>Bulk Upload Data (Excel / Word)</h3>
-          <p>Upload `.xlsx`, `.xls`, `.csv`, or `.docx` file for the selected data type.</p>
+          <h3>Bulk Upload Mixed Data (Excel)</h3>
+          <p>Upload one mixed `.xlsx` or `.xls` file containing all required entities.</p>
 
           <div className="upload-controls">
-            <select
-              value={uploadEntity}
-              onChange={(e) => setUploadEntity(e.target.value)}
-            >
-              <option value="department">Department</option>
-              <option value="course">Course</option>
-              <option value="academic">Academic</option>
-              <option value="section">Section</option>
-              <option value="subject">Subject</option>
-              <option value="teacher">Teacher</option>
-            </select>
-
             <input
+              ref={fileInputRef}
+              className="hidden-file-input"
               type="file"
-              accept=".xlsx,.xls,.csv,.docx"
+              accept=".xlsx,.xls"
               onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
             />
+
+            <button
+              type="button"
+              className="choose-file-btn"
+              onClick={() => fileInputRef.current?.click()}
+            >
+              Choose Excel
+            </button>
+
+            <div className="file-name-display">
+              {uploadFile ? uploadFile.name : 'No file chosen'}
+            </div>
 
             <button className="generate-btn upload-btn" onClick={handleUpload} disabled={isUploading}>
               {isUploading ? 'Uploading...' : 'Upload File'}
