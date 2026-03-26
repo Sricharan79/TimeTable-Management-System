@@ -1,5 +1,8 @@
 const express = require('express');
 const router = express.Router();
+const multer = require('multer');
+const xlsx = require('xlsx');
+const mammoth = require('mammoth');
 
 const Department = require('../models/Department');
 const Course = require('../models/Course');
@@ -7,6 +10,194 @@ const Academic = require('../models/Academic');
 const Section = require('../models/Section');
 const Subject = require('../models/Subject');
 const Teacher = require('../models/Teacher');
+
+const upload = multer({ storage: multer.memoryStorage() });
+
+const normalizeText = (value) => String(value ?? '').trim();
+
+const parseRawTextToRows = (rawText) => {
+  const lines = rawText
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  if (!lines.length) return [];
+
+  const separator = lines[0].includes('\t')
+    ? '\t'
+    : lines[0].includes('|')
+      ? '|'
+      : ',';
+
+  const headers = lines[0]
+    .split(separator)
+    .map((header) => normalizeText(header).toLowerCase());
+
+  return lines.slice(1).map((line) => {
+    const values = line.split(separator).map((value) => normalizeText(value));
+    const row = {};
+
+    headers.forEach((header, index) => {
+      row[header] = values[index] ?? '';
+    });
+
+    return row;
+  });
+};
+
+const parseUploadRows = async (file) => {
+  const extension = (file.originalname.split('.').pop() || '').toLowerCase();
+
+  if (['xlsx', 'xls', 'csv'].includes(extension)) {
+    const workbook = xlsx.read(file.buffer, { type: 'buffer' });
+    const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+
+    return xlsx.utils.sheet_to_json(firstSheet, {
+      defval: '',
+      raw: false
+    });
+  }
+
+  if (extension === 'docx') {
+    const { value } = await mammoth.extractRawText({ buffer: file.buffer });
+    return parseRawTextToRows(value);
+  }
+
+  throw new Error('Unsupported file format. Please upload .xlsx, .xls, .csv, or .docx');
+};
+
+const getCaseInsensitive = (row, key) => {
+  const matchedKey = Object.keys(row).find(
+    (rowKey) => normalizeText(rowKey).toLowerCase() === key.toLowerCase()
+  );
+
+  return matchedKey ? row[matchedKey] : '';
+};
+
+const toNumber = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+// Upload and import data from Excel/Word
+router.post('/upload', upload.single('file'), async (req, res) => {
+  try {
+    const { entity, departmentId, courseId, academicId } = req.body;
+
+    if (!entity) {
+      return res.status(400).json({ error: 'entity is required' });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({ error: 'file is required' });
+    }
+
+    const rows = await parseUploadRows(req.file);
+
+    if (!rows.length) {
+      return res.status(400).json({ error: 'No rows found in uploaded file' });
+    }
+
+    const imported = [];
+    const skipped = [];
+
+    for (const row of rows) {
+      try {
+        if (entity === 'department') {
+          const name = normalizeText(getCaseInsensitive(row, 'name'));
+          if (!name) throw new Error('name is required');
+
+          const created = await Department.create({ name });
+          imported.push(created);
+        } else if (entity === 'course') {
+          const name = normalizeText(getCaseInsensitive(row, 'name'));
+          const currentDepartmentId = normalizeText(getCaseInsensitive(row, 'departmentId')) || departmentId;
+          if (!name || !currentDepartmentId) throw new Error('name and departmentId are required');
+
+          const created = await Course.create({
+            name,
+            departmentId: currentDepartmentId
+          });
+          imported.push(created);
+        } else if (entity === 'academic') {
+          const year = toNumber(getCaseInsensitive(row, 'year'));
+          const semester = toNumber(getCaseInsensitive(row, 'semester'));
+          const currentCourseId = normalizeText(getCaseInsensitive(row, 'courseId')) || courseId;
+          if (!currentCourseId || year === null || semester === null) {
+            throw new Error('courseId, year and semester are required');
+          }
+
+          const created = await Academic.create({
+            courseId: currentCourseId,
+            year,
+            semester
+          });
+          imported.push(created);
+        } else if (entity === 'section') {
+          const name = normalizeText(getCaseInsensitive(row, 'name'));
+          const currentAcademicId = normalizeText(getCaseInsensitive(row, 'academicId')) || academicId;
+          if (!name || !currentAcademicId) throw new Error('name and academicId are required');
+
+          const created = await Section.create({
+            name,
+            academicId: currentAcademicId
+          });
+          imported.push(created);
+        } else if (entity === 'subject') {
+          const name = normalizeText(getCaseInsensitive(row, 'name'));
+          const currentCourseId = normalizeText(getCaseInsensitive(row, 'courseId')) || courseId;
+          if (!name || !currentCourseId) throw new Error('name and courseId are required');
+
+          const created = await Subject.create({
+            name,
+            courseId: currentCourseId
+          });
+          imported.push(created);
+        } else if (entity === 'teacher') {
+          const name = normalizeText(getCaseInsensitive(row, 'name'));
+          const currentDepartmentId = normalizeText(getCaseInsensitive(row, 'departmentId')) || departmentId;
+          const subjectsCell = normalizeText(getCaseInsensitive(row, 'subjects'));
+
+          if (!name || !currentDepartmentId) throw new Error('name and departmentId are required');
+
+          let subjectIds = [];
+          if (subjectsCell) {
+            const subjectNames = subjectsCell
+              .split(',')
+              .map((value) => normalizeText(value))
+              .filter(Boolean);
+
+            if (subjectNames.length) {
+              const subjectDocs = await Subject.find({ name: { $in: subjectNames } });
+              subjectIds = subjectDocs.map((subject) => subject._id);
+            }
+          }
+
+          const created = await Teacher.create({
+            name,
+            departmentId: currentDepartmentId,
+            subjects: subjectIds
+          });
+          imported.push(created);
+        } else {
+          return res.status(400).json({ error: 'Unsupported entity. Use department, course, academic, section, subject, or teacher' });
+        }
+      } catch (rowError) {
+        skipped.push({ row, reason: rowError.message });
+      }
+    }
+
+    return res.json({
+      message: 'Upload processed',
+      entity,
+      importedCount: imported.length,
+      skippedCount: skipped.length,
+      skipped
+    });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
 
 
 // =====================
