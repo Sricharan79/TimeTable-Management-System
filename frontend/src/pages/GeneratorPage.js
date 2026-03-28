@@ -145,16 +145,6 @@ function GeneratorPage({ embedded = false }) {
     }
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('authToken');
-    sessionStorage.removeItem('token');
-    sessionStorage.removeItem('authToken');
-    delete API.defaults.headers.common.Authorization;
-    window.location.href = '/';
-  };
-
-
   // ================= SUBJECT NAME MAP =================
   const subjectMap = {};
   subjects.forEach(s => {
@@ -199,8 +189,6 @@ function GeneratorPage({ embedded = false }) {
 
   return (
     <div className={`generator-page ${embedded ? 'generator-embedded' : ''}`}>
-      {!embedded && <button className="logout-btn corner-logout" onClick={handleLogout}>Logout</button>}
-
       {!embedded && (
         <header className="top-bar">
           <div className="brand-text">

@@ -188,19 +188,8 @@ function AdminDashboard() {
     }
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('authToken');
-    sessionStorage.removeItem('token');
-    sessionStorage.removeItem('authToken');
-    delete API.defaults.headers.common.Authorization;
-    window.location.href = '/';
-  };
-
   return (
     <div className="generator-page">
-      <button className="logout-btn corner-logout" onClick={handleLogout}>Logout</button>
-
       <header className="top-bar">
         <div className="brand-text">
           <h2>Aurora University TimeTable Portal</h2>
