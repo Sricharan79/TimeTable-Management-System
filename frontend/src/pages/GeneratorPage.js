@@ -3,7 +3,7 @@ import API from '../services/api';
 import auroraLogo from '../assets/image.png';
 import './styles.css';
 
-function GeneratorPage() {
+function GeneratorPage({ embedded = false }) {
 
   const [departments, setDepartments] = useState([]);
   const [courses, setCourses] = useState([]);
@@ -168,20 +168,22 @@ function GeneratorPage() {
     selected.sectionId;
 
   return (
-    <div className="generator-page">
-      <button className="logout-btn corner-logout" onClick={handleLogout}>Logout</button>
+    <div className={`generator-page ${embedded ? 'generator-embedded' : ''}`}>
+      {!embedded && <button className="logout-btn corner-logout" onClick={handleLogout}>Logout</button>}
 
-      <header className="top-bar">
-        <div className="brand-text">
-          <h2>Aurora University TimeTable Portal</h2>
-          <p>Academic Scheduling Dashboard</p>
-        </div>
-        <img src={auroraLogo} alt="Aurora University" className="uni-logo right-logo" />
-      </header>
+      {!embedded && (
+        <header className="top-bar">
+          <div className="brand-text">
+            <h2>Aurora University TimeTable Portal</h2>
+            <p>Academic Scheduling Dashboard</p>
+          </div>
+          <img src={auroraLogo} alt="Aurora University" className="uni-logo right-logo" />
+        </header>
+      )}
 
       <div className="container">
 
-        <h1>🎓 TimeTable Generator</h1>
+        <h1> TimeTable Generator</h1>
         <p className="subtitle">Professional timetable planning for departments, teachers and sections</p>
 
         <div className="card">
@@ -227,7 +229,7 @@ function GeneratorPage() {
           </select>
 
           <button className="generate-btn" onClick={handleGenerate} disabled={!canGenerate}>
-            🚀 Generate Timetable
+           Generate Timetable
           </button>
 
         </div>
