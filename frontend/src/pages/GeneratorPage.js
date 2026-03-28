@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import API from '../services/api';
 import auroraLogo from '../assets/image.png';
 import './styles.css';
@@ -11,6 +11,7 @@ function GeneratorPage({ embedded = false }) {
   const [sections, setSections] = useState([]);
 
   const [subjects, setSubjects] = useState([]);
+  const [teachers, setTeachers] = useState([]);
 
   const [selected, setSelected] = useState({
     departmentId: '',
@@ -20,17 +21,20 @@ function GeneratorPage({ embedded = false }) {
   });
 
   const [timetable, setTimetable] = useState({});
-  const [uploadFile, setUploadFile] = useState(null);
-  const [uploadMessage, setUploadMessage] = useState('');
-  const [uploadError, setUploadError] = useState('');
-  const [isUploading, setIsUploading] = useState(false);
-  const fileInputRef = useRef(null);
+  const [displaySlots, setDisplaySlots] = useState([]);
+  const [timetableId, setTimetableId] = useState('');
+  const [remainingBySubject, setRemainingBySubject] = useState({});
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState('');
 
   // ================= LOAD DEPARTMENTS =================
+  const loadDepartments = async () => {
+    const res = await API.get('/master/departments');
+    setDepartments(res.data);
+  };
+
   useEffect(() => {
-    API.get('/master/departments')
-      .then(res => setDepartments(res.data))
-      .catch(err => console.error(err));
+    loadDepartments().catch(err => console.error(err));
   }, []);
 
   // ================= DEPARTMENT CHANGE =================
@@ -46,6 +50,8 @@ function GeneratorPage({ embedded = false }) {
 
     const res = await API.get(`/master/courses/${departmentId}`);
     setCourses(res.data);
+    const resTeachers = await API.get(`/master/teachers/${departmentId}`);
+    setTeachers(resTeachers.data);
     setAcademics([]);
     setSections([]);
   };
@@ -92,16 +98,51 @@ function GeneratorPage({ embedded = false }) {
       sectionId: selected.sectionId
     });
 
-    const data = res.data.entries;
+    const { timetable: timetableDoc, displaySlots: slots, remainingBySubject: remaining } = res.data;
+    const data = timetableDoc.entries;
 
     const formatted = {};
 
     data.forEach(item => {
       if (!formatted[item.day]) formatted[item.day] = {};
-      formatted[item.day][item.period] = item.subjectId;
+      formatted[item.day][item.period] = {
+        subjectId: item.subjectId,
+        teacherId: item.teacherId
+      };
     });
 
     setTimetable(formatted);
+    setDisplaySlots(slots || []);
+    setTimetableId(timetableDoc._id || '');
+    setRemainingBySubject(remaining || {});
+  };
+
+  const handleDownload = async () => {
+    if (!timetableId) return;
+
+    try {
+      setIsDownloading(true);
+      setDownloadError('');
+      const response = await API.get(`/timetable/download/${timetableId}`, {
+        responseType: 'blob'
+      });
+
+      const blob = new Blob([response.data], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'timetable.xlsx';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      setDownloadError(error.response?.data?.error || 'Download failed.');
+    } finally {
+      setIsDownloading(false);
+    }
   };
 
   const handleLogout = () => {
@@ -113,45 +154,6 @@ function GeneratorPage({ embedded = false }) {
     window.location.href = '/';
   };
 
-  const handleUpload = async () => {
-    if (!uploadFile) {
-      setUploadError('Please choose a file first.');
-      setUploadMessage('');
-      return;
-    }
-
-    try {
-      setIsUploading(true);
-      setUploadError('');
-      setUploadMessage('');
-
-      const formData = new FormData();
-      formData.append('file', uploadFile);
-      formData.append('entity', 'mixed');
-
-      if (selected.departmentId) formData.append('departmentId', selected.departmentId);
-      if (selected.courseId) formData.append('courseId', selected.courseId);
-      if (selected.academicId) formData.append('academicId', selected.academicId);
-
-      const response = await API.post('/master/upload', formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data'
-        }
-      });
-
-      setUploadMessage(
-        `Imported ${response.data.importedCount} row(s). Skipped ${response.data.skippedCount} row(s).`
-      );
-      setUploadFile(null);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
-      }
-    } catch (error) {
-      setUploadError(error.response?.data?.error || 'Upload failed. Please check file format and data columns.');
-    } finally {
-      setIsUploading(false);
-    }
-  };
 
   // ================= SUBJECT NAME MAP =================
   const subjectMap = {};
@@ -159,13 +161,41 @@ function GeneratorPage({ embedded = false }) {
     subjectMap[s._id] = s.name;
   });
 
+  const teacherMap = {};
+  teachers.forEach(t => {
+    teacherMap[t._id] = t.name;
+  });
+
   const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
-  const periods = [1, 2, 3, 4, 5];
+  const fallbackSlots = [
+    { period: 1, label: 'P1', start: '09:30', end: '10:20' },
+    { period: 2, label: 'P2', start: '10:20', end: '11:10' },
+    { period: 3, label: 'P3', start: '11:10', end: '12:00' },
+    { period: 4, label: 'P4', start: '12:00', end: '12:50' },
+    { label: 'Lunch', start: '12:50', end: '13:20', isBreak: true },
+    { period: 5, label: 'P5', start: '13:20', end: '14:10' },
+    { period: 6, label: 'P6', start: '14:10', end: '15:00' },
+    { period: 7, label: 'P7', start: '15:00', end: '15:50' },
+    { period: 8, label: 'P8', start: '15:50', end: '16:40' }
+  ];
+  const slotColumns = displaySlots.length ? displaySlots : fallbackSlots;
   const canGenerate =
     selected.departmentId &&
     selected.courseId &&
     selected.academicId &&
     selected.sectionId;
+
+  const selectedDepartment = departments.find((dep) => dep._id === selected.departmentId);
+  const selectedCourse = courses.find((course) => course._id === selected.courseId);
+  const selectedAcademic = academics.find((academic) => academic._id === selected.academicId);
+  const selectedSection = sections.find((section) => section._id === selected.sectionId);
+
+  const remainingItems = Object.entries(remainingBySubject)
+    .filter(([, remaining]) => remaining > 0)
+    .map(([subjectId, remaining]) => ({
+      name: subjectMap[subjectId] || 'Unknown subject',
+      remaining
+    }));
 
   return (
     <div className={`generator-page ${embedded ? 'generator-embedded' : ''}`}>
@@ -232,43 +262,42 @@ function GeneratorPage({ embedded = false }) {
            Generate Timetable
           </button>
 
-        </div>
+          <button
+            className="generate-btn download-btn"
+            onClick={handleDownload}
+            disabled={!timetableId || isDownloading}
+          >
+            {isDownloading ? 'Downloading...' : '⬇️ Download Timetable'}
+          </button>
 
-        <div className="upload-panel">
-          <h3>Bulk Upload Mixed Data (Excel)</h3>
-          <p>Upload one mixed `.xlsx` or `.xls` file containing all required entities.</p>
-
-          <div className="upload-controls">
-            <input
-              ref={fileInputRef}
-              className="hidden-file-input"
-              type="file"
-              accept=".xlsx,.xls"
-              onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
-            />
-
-            <button
-              type="button"
-              className="choose-file-btn"
-              onClick={() => fileInputRef.current?.click()}
-            >
-              Choose Excel
-            </button>
-
-            <div className="file-name-display">
-              {uploadFile ? uploadFile.name : 'No file chosen'}
-            </div>
-
-            <button className="generate-btn upload-btn" onClick={handleUpload} disabled={isUploading}>
-              {isUploading ? 'Uploading...' : 'Upload File'}
-            </button>
-          </div>
-
-          {uploadMessage && <div className="upload-status success">{uploadMessage}</div>}
-          {uploadError && <div className="upload-status error">{uploadError}</div>}
         </div>
 
         {/* ================= TABLE ================= */}
+        {Object.keys(timetable).length > 0 && (
+          <div className="selection-summary">
+            <div className="summary-item">
+              <span>School</span>
+              <strong>{selectedDepartment?.name || '—'}</strong>
+            </div>
+            <div className="summary-item">
+              <span>Program</span>
+              <strong>{selectedCourse?.name || '—'}</strong>
+            </div>
+            <div className="summary-item">
+              <span>Year</span>
+              <strong>{selectedAcademic?.year ? `Year ${selectedAcademic.year}` : '—'}</strong>
+            </div>
+            <div className="summary-item">
+              <span>Term</span>
+              <strong>{selectedAcademic?.semester ? `Term ${selectedAcademic.semester}` : '—'}</strong>
+            </div>
+            <div className="summary-item">
+              <span>Section</span>
+              <strong>{selectedSection?.name || '—'}</strong>
+            </div>
+          </div>
+        )}
+
         {Object.keys(timetable).length > 0 && (
           <div className="table-shell">
             <table className="timetable">
@@ -276,8 +305,13 @@ function GeneratorPage({ embedded = false }) {
               <thead>
                 <tr>
                   <th>Day</th>
-                  {periods.map(p => (
-                    <th key={p}>P{p}</th>
+                  {slotColumns.map((slot, index) => (
+                    <th key={slot.label || slot.period || index}>
+                      <div className="slot-header">
+                        <span>{slot.label || `P${slot.period}`}</span>
+                        <small>{slot.start} - {slot.end}</small>
+                      </div>
+                    </th>
                   ))}
                 </tr>
               </thead>
@@ -287,9 +321,11 @@ function GeneratorPage({ embedded = false }) {
                   <tr key={day}>
                     <td><b>{day}</b></td>
 
-                    {periods.map(p => (
-                      <td key={p}>
-                        {subjectMap[timetable[day]?.[p]] || '—'}
+                    {slotColumns.map((slot, index) => (
+                      <td key={`${day}-${slot.label || slot.period || index}`}>
+                        {slot.isBreak
+                          ? 'Lunch'
+                          : subjectMap[timetable[day]?.[slot.period]?.subjectId] || '—'}
                       </td>
                     ))}
 
@@ -305,6 +341,60 @@ function GeneratorPage({ embedded = false }) {
           <div className="empty-state" role="status" aria-live="polite">
             <h3>Ready to Generate Timetable</h3>
             <p>Select department, course, year/semester, and section, then click Generate Timetable.</p>
+          </div>
+        )}
+
+        {downloadError && <div className="download-error">{downloadError}</div>}
+
+        {remainingItems.length > 0 && (
+          <div className="remaining-panel">
+            <h3>Remaining Classes (per week)</h3>
+            <div className="remaining-grid">
+              {remainingItems.map((item) => (
+                <div key={item.name} className="remaining-card">
+                  <span>{item.name}</span>
+                  <strong>{item.remaining}</strong>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {Object.keys(timetable).length > 0 && (
+          <div className="teacher-panel">
+            <h3>Course - Teacher Allocation</h3>
+            <table className="teacher-table">
+              <thead>
+                <tr>
+                  <th>Course</th>
+                  <th>Teacher</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(() => {
+                  const pairs = new Map();
+                  Object.values(timetable).forEach((daySlots) => {
+                    Object.values(daySlots).forEach((slot) => {
+                      if (!slot?.subjectId || !slot?.teacherId) return;
+                      const key = `${slot.subjectId}-${slot.teacherId}`;
+                      if (!pairs.has(key)) {
+                        pairs.set(key, {
+                          subjectName: subjectMap[slot.subjectId] || '—',
+                          teacherName: teacherMap[slot.teacherId] || '—'
+                        });
+                      }
+                    });
+                  });
+
+                  return Array.from(pairs.entries()).map(([key, item]) => (
+                    <tr key={key}>
+                      <td>{item.subjectName}</td>
+                      <td>{item.teacherName}</td>
+                    </tr>
+                  ));
+                })()}
+              </tbody>
+            </table>
           </div>
         )}
 
