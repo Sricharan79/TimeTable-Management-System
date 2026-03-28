@@ -58,21 +58,11 @@ body {
 }
 
 .generator-page {
-  min-height: calc(100vh - 170px);
-  padding: 12px 0 24px;
+  min-height: 100vh;
+  padding: 22px 20px 36px;
   background: transparent;
   position: relative;
   overflow: hidden;
-}
-
-.generator-embedded {
-  min-height: auto;
-  padding: 0;
-}
-
-.generator-embedded::before,
-.generator-embedded::after {
-  display: none;
 }
 
 .generator-page::before {
@@ -83,7 +73,7 @@ body {
   right: -140px;
   bottom: -140px;
   border-radius: 50%;
-  background: rgba(155, 210, 255, 0.22);
+  background: rgba(255, 255, 255, 0.08);
   filter: blur(10px);
   pointer-events: none;
 }
@@ -96,7 +86,7 @@ body {
   left: -180px;
   top: 36%;
   border-radius: 50%;
-  background: rgba(187, 226, 255, 0.28);
+  background: rgba(255, 255, 255, 0.06);
   filter: blur(14px);
   pointer-events: none;
 }
@@ -106,14 +96,14 @@ body {
   margin: 0 auto 18px;
   padding: 18px 24px;
   border-radius: 20px;
-  border: 1px solid rgba(157, 204, 255, 0.46);
-  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.26);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0.1));
   backdrop-filter: blur(16px);
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 20px;
-  box-shadow: 0 14px 32px rgba(37, 98, 183, 0.2);
+  box-shadow: 0 16px 42px rgba(6, 22, 62, 0.3);
   position: relative;
   z-index: 1;
   transition: transform 0.2s ease, box-shadow 0.25s ease;
@@ -121,7 +111,7 @@ body {
 
 .top-bar:hover {
   transform: translateY(-2px);
-  box-shadow: 0 18px 38px rgba(38, 102, 191, 0.24);
+  box-shadow: 0 22px 46px rgba(6, 22, 62, 0.34);
 }
 
 .uni-logo {
@@ -154,7 +144,7 @@ body {
   font-weight: 800;
   line-height: 1.15;
   letter-spacing: 0.25px;
-  background: linear-gradient(90deg, #0f4d99 0%, #1f6cc5 42%, #2f89e6 100%);
+  background: linear-gradient(90deg, #f6f4ff 0%, #d9d4ff 42%, #a8c0ff 100%);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
@@ -162,15 +152,15 @@ body {
 
 .brand-text p {
   margin: 8px 0 0;
-  color: rgba(20, 79, 146, 0.9);
+  color: rgba(236, 241, 255, 0.94);
   font-size: 0.97rem;
   font-weight: 500;
   letter-spacing: 0.2px;
 }
 
 .logout-btn {
-  border: 1px solid rgba(118, 177, 255, 0.62);
-  background: linear-gradient(100deg, rgba(20, 87, 183, 0.94), rgba(35, 113, 215, 0.92));
+  border: 1px solid rgba(206, 197, 255, 0.65);
+  background: linear-gradient(100deg, rgba(106, 83, 235, 0.9), rgba(83, 103, 238, 0.88));
   color: #fff;
   padding: 10px 18px;
   border-radius: 12px;
@@ -181,9 +171,9 @@ body {
 }
 
 .logout-btn:hover {
-  background: linear-gradient(100deg, rgba(30, 100, 199, 0.96), rgba(46, 127, 229, 0.94));
+  background: linear-gradient(100deg, rgba(124, 101, 245, 0.95), rgba(94, 115, 248, 0.92));
   transform: translateY(-1px);
-  box-shadow: 0 10px 20px rgba(22, 76, 156, 0.42);
+  box-shadow: 0 10px 20px rgba(41, 34, 119, 0.45);
 }
 
 .corner-logout {
@@ -197,7 +187,7 @@ body {
   max-width: 1150px;
   margin: 0 auto;
   text-align: center;
-  color: #0f376d;
+  color: #ffffff;
   position: relative;
   z-index: 1;
 }
@@ -212,15 +202,14 @@ body {
 .subtitle {
   margin: 0 0 18px;
   font-size: 1rem;
-  opacity: 1;
-  color: #245a9d;
+  opacity: 0.95;
 }
 
 .card {
   max-width: 1150px;
   margin: 0 auto;
-  background: rgba(255, 255, 255, 0.96);
-  border: 1px solid rgba(153, 202, 255, 0.46);
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0.11));
+  border: 1px solid rgba(255, 255, 255, 0.28);
   backdrop-filter: blur(14px);
   padding: 18px;
   border-radius: 18px;
@@ -228,7 +217,7 @@ body {
   flex-wrap: wrap;
   justify-content: center;
   gap: 12px;
-  box-shadow: 0 14px 30px rgba(40, 106, 191, 0.2);
+  box-shadow: 0 16px 40px rgba(8, 25, 69, 0.28);
 }
 
 select {
@@ -294,9 +283,9 @@ input[type='number']:focus {
 
 .generate-btn {
   height: 46px;
-  border: 1px solid rgba(118, 177, 255, 0.62);
+  border: 1px solid rgba(255, 255, 255, 0.28);
   border-radius: 12px;
-  background: linear-gradient(105deg, #1456b8 0%, #1f6fd8 48%, #328ae8 100%);
+  background: linear-gradient(105deg, #4f3fd3 0%, #5667ea 48%, #3f7de7 100%);
   background-size: 180% 180%;
   color: #ffffff;
   font-size: 1rem;
@@ -304,14 +293,14 @@ input[type='number']:focus {
   letter-spacing: 0.25px;
   padding: 0 20px;
   cursor: pointer;
-  box-shadow: 0 14px 26px rgba(20, 84, 171, 0.38);
+  box-shadow: 0 14px 26px rgba(49, 57, 157, 0.46);
   transition: transform 0.2s ease, opacity 0.2s ease, box-shadow 0.2s ease, background-position 0.35s ease;
 }
 
 .generate-btn:hover {
   transform: translateY(-2px) scale(1.01);
   background-position: 100% 0;
-  box-shadow: 0 18px 34px rgba(22, 90, 182, 0.44);
+  box-shadow: 0 18px 34px rgba(48, 58, 168, 0.55);
 }
 
 .generate-btn:disabled {
@@ -374,23 +363,23 @@ input[type='number']:focus {
   max-width: 1150px;
   margin: 14px auto 0;
   border-radius: 16px;
-  border: 1px solid rgba(155, 204, 255, 0.46);
-  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid rgba(223, 228, 255, 0.36);
+  background: linear-gradient(150deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.09));
   backdrop-filter: blur(10px);
   padding: 16px;
   text-align: left;
-  box-shadow: 0 12px 24px rgba(40, 106, 191, 0.18);
+  box-shadow: 0 12px 24px rgba(26, 27, 85, 0.26);
 }
 
 .upload-panel h3 {
   margin: 0;
-  color: #14508f;
+  color: #f2f5ff;
   font-size: 1.05rem;
 }
 
 .upload-panel p {
   margin: 6px 0 12px;
-  color: rgba(28, 88, 155, 0.9);
+  color: rgba(232, 238, 255, 0.9);
   font-size: 0.9rem;
 }
 
@@ -409,10 +398,10 @@ input[type='number']:focus {
 .choose-file-btn {
   height: 46px;
   min-width: 140px;
-  border: 1px solid rgba(118, 177, 255, 0.6);
+  border: 1px solid rgba(203, 209, 255, 0.55);
   border-radius: 12px;
   color: #f3f5ff;
-  background: linear-gradient(105deg, #1456b8 0%, #2a7ce2 100%);
+  background: linear-gradient(105deg, #4d43b7 0%, #5e63d6 100%);
   font-size: 0.95rem;
   font-weight: 600;
   padding: 0 14px;
@@ -422,7 +411,7 @@ input[type='number']:focus {
 
 .choose-file-btn:hover {
   transform: translateY(-1px);
-  box-shadow: 0 10px 20px rgba(22, 90, 182, 0.36);
+  box-shadow: 0 10px 20px rgba(58, 64, 165, 0.4);
 }
 
 .file-name-display {
@@ -434,8 +423,8 @@ input[type='number']:focus {
   border: 1px solid #b8c9ea;
   border-radius: 12px;
   padding: 0 12px;
-  color: #1f5c9f;
-  background: rgba(218, 238, 255, 0.88);
+  color: #eaf0ff;
+  background: rgba(45, 60, 133, 0.36);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
