@@ -15,6 +15,17 @@ const upload = multer({ storage: multer.memoryStorage() });
 
 const normalizeText = (value) => String(value ?? '').trim();
 
+const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const findDepartmentByNameInsensitive = async (name) => {
+  const normalized = normalizeText(name);
+  if (!normalized) return null;
+
+  return Department.findOne({
+    name: { $regex: `^${escapeRegExp(normalized)}$`, $options: 'i' }
+  });
+};
+
 const parseRawTextToRows = (rawText) => {
   const lines = rawText
     .split(/\r?\n/)
@@ -89,6 +100,11 @@ const importRowsByEntity = async (entity, rows, context = {}) => {
       if (entity === 'department') {
         const name = normalizeText(getCaseInsensitive(row, 'name'));
         if (!name) throw new Error('name is required');
+
+        const existingDepartment = await findDepartmentByNameInsensitive(name);
+        if (existingDepartment) {
+          throw new Error('department already exists');
+        }
 
         const created = await Department.create({ name });
         imported.push(created);
@@ -313,7 +329,18 @@ router.post('/upload', upload.single('file'), async (req, res) => {
 // Add Department
 router.post('/department', async (req, res) => {
   try {
-    const data = await Department.create(req.body);
+    const name = normalizeText(req.body?.name);
+
+    if (!name) {
+      return res.status(400).json({ error: 'Department name is required' });
+    }
+
+    const existingDepartment = await findDepartmentByNameInsensitive(name);
+    if (existingDepartment) {
+      return res.status(409).json({ error: 'Department already exists' });
+    }
+
+    const data = await Department.create({ ...req.body, name });
     res.json(data);
   } catch (err) {
     res.status(500).json({ error: err.message });

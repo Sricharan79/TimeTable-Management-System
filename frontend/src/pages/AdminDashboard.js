@@ -3,6 +3,16 @@ import API from '../services/api';
 import auroraLogo from '../assets/image.png';
 import './styles.css';
 
+const dedupeDepartmentsByName = (items = []) => {
+  const seen = new Set();
+  return items.filter((department) => {
+    const key = String(department?.name || '').trim().toLowerCase();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
+
 function AdminDashboard() {
   const [departments, setDepartments] = useState([]);
   const [allCourses, setAllCourses] = useState([]);
@@ -33,7 +43,7 @@ function AdminDashboard() {
 
   const loadDepartments = async () => {
     const res = await API.get('/master/departments');
-    setDepartments(res.data);
+    setDepartments(dedupeDepartmentsByName(res.data));
   };
 
   const loadAllCourses = async () => {

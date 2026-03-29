@@ -224,10 +224,10 @@ function GeneratorPage({ embedded = false }) {
 
           {/* Academic */}
           <select value={selected.academicId} onChange={handleAcademicChange} disabled={!selected.courseId}>
-            <option value="">Select Year / Semester</option>
+            <option value="">Select Year / Term</option>
             {academics.map(a => (
               <option key={a._id} value={a._id}>
-                Year {a.year} - Sem {a.semester}
+                Year {a.year} - Term {a.semester}
               </option>
             ))}
           </select>
@@ -328,7 +328,7 @@ function GeneratorPage({ embedded = false }) {
         {Object.keys(timetable).length === 0 && (
           <div className="empty-state" role="status" aria-live="polite">
             <h3>Ready to Generate Timetable</h3>
-            <p>Select department, course, year/semester, and section, then click Generate Timetable.</p>
+            <p>Select department, course, year/term, and section, then click Generate Timetable.</p>
           </div>
         )}
 
