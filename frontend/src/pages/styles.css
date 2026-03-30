@@ -868,3 +868,110 @@ input[type='number']:focus {
   background: rgba(153, 42, 72, 0.24);
   color: #ffd5df;
 }
+
+.manage-filters-grid {
+  margin-bottom: 12px;
+}
+
+.manage-layout {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.manage-box {
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.05);
+  overflow: hidden;
+}
+
+.manage-box h4 {
+  margin: 0;
+  padding: 12px 14px;
+  border-bottom: 1px solid #e8e8e8;
+  background: #f8f9fa;
+  font-size: 0.95rem;
+  color: #1c1c1c;
+}
+
+.manage-edit-form {
+  padding: 12px;
+  border-bottom: 1px solid #e8e8e8;
+  display: grid;
+  gap: 8px;
+  background: #fcfdff;
+}
+
+.full-width-box {
+  grid-column: 1 / -1;
+}
+
+.manage-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.manage-table th,
+.manage-table td {
+  border-bottom: 1px solid #ededed;
+  padding: 10px 12px;
+  text-align: left;
+  vertical-align: top;
+  font-size: 0.88rem;
+}
+
+.manage-table th {
+  background: #f5f7fb;
+  color: #1f2a44;
+  font-weight: 600;
+}
+
+.manage-table tbody tr:hover td {
+  background: #fafcff;
+}
+
+.action-cell {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.action-btn {
+  height: 32px;
+  border-radius: 6px;
+  border: none;
+  padding: 0 10px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.edit-btn {
+  background: #eaf2ff;
+  color: #1f4fbf;
+}
+
+.edit-btn:hover {
+  background: #dce9ff;
+}
+
+.delete-btn {
+  background: #ffe9ee;
+  color: #b12044;
+}
+
+.delete-btn:hover {
+  background: #ffd9e2;
+}
+
+@media (max-width: 980px) {
+  .manage-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .manage-edit-form {
+    padding: 10px;
+  }
+}

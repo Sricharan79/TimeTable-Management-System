@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import GeneratorPage from './pages/GeneratorPage';
 import AdminDashboard from './pages/AdminDashboard';
+import ManageDataPage from './pages/ManageDataPage';
 import FacultyDashboard from './pages/FacultyDashboard';
 import FacultyNotificationsPage from './pages/FacultyNotificationsPage';
 import Sidebar from './components/Sidebar';
@@ -40,13 +41,8 @@ function App() {
   if (activePortal === 'admin') {
     if (activeView === 'generator') {
       pageContent = <GeneratorPage />;
-    } else if (activeView === 'feedback') {
-      pageContent = renderPlaceholder(
-        'Aurora University TimeTable Portal',
-        'Student Feedback',
-        'Student Feedback',
-        'Student feedback dashboard is ready for integration.'
-      );
+    } else if (activeView === 'manage-data') {
+      pageContent = <ManageDataPage />;
     } else {
       pageContent = <AdminDashboard />;
     }

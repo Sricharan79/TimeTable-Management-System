@@ -1,7 +1,18 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import API from '../services/api';
+import { MASTER_DATA_SYNC_KEY, MASTER_DATA_UPDATED_EVENT } from '../services/dataSync';
 import auroraLogo from '../assets/image.png';
 import './styles.css';
+
+const dedupeSectionsByName = (items = []) => {
+  const seen = new Set();
+  return items.filter((section) => {
+    const key = String(section?.name || '').trim().toLowerCase();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
 
 function GeneratorPage({ embedded = false }) {
 
@@ -26,16 +37,134 @@ function GeneratorPage({ embedded = false }) {
   const [remainingBySubject, setRemainingBySubject] = useState({});
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState('');
+  const selectedRef = useRef(selected);
+
+  useEffect(() => {
+    selectedRef.current = selected;
+  }, [selected]);
 
   // ================= LOAD DEPARTMENTS =================
   const loadDepartments = async () => {
     const res = await API.get('/master/departments');
     setDepartments(res.data);
+    return res.data;
   };
 
-  useEffect(() => {
-    loadDepartments().catch(err => console.error(err));
+  const syncHierarchyFromSelection = useCallback(async () => {
+    const current = selectedRef.current;
+    const latestDepartments = await loadDepartments();
+
+    if (!current.departmentId) {
+      setCourses([]);
+      setTeachers([]);
+      setAcademics([]);
+      setSubjects([]);
+      setSections([]);
+      return;
+    }
+
+    const selectedDepartmentExists = latestDepartments.some((item) => item._id === current.departmentId);
+    if (!selectedDepartmentExists) {
+      setSelected({ departmentId: '', courseId: '', academicId: '', sectionId: '' });
+      setCourses([]);
+      setTeachers([]);
+      setAcademics([]);
+      setSubjects([]);
+      setSections([]);
+      return;
+    }
+
+    const [coursesRes, teachersRes] = await Promise.all([
+      API.get(`/master/courses/${current.departmentId}`),
+      API.get(`/master/teachers/${current.departmentId}`)
+    ]);
+    const latestCourses = coursesRes.data;
+    setCourses(latestCourses);
+    setTeachers(teachersRes.data);
+
+    if (!current.courseId) {
+      setAcademics([]);
+      setSubjects([]);
+      setSections([]);
+      return;
+    }
+
+    const selectedCourseExists = latestCourses.some((item) => item._id === current.courseId);
+    if (!selectedCourseExists) {
+      setSelected((prev) => ({ ...prev, courseId: '', academicId: '', sectionId: '' }));
+      setAcademics([]);
+      setSubjects([]);
+      setSections([]);
+      return;
+    }
+
+    const [academicsRes, subjectsRes] = await Promise.all([
+      API.get(`/master/academic/${current.courseId}`),
+      API.get(`/master/subjects/${current.courseId}`)
+    ]);
+    const latestAcademics = academicsRes.data;
+    setAcademics(latestAcademics);
+    setSubjects(subjectsRes.data);
+
+    if (!current.academicId) {
+      setSections([]);
+      return;
+    }
+
+    const selectedAcademicExists = latestAcademics.some((item) => item._id === current.academicId);
+    if (!selectedAcademicExists) {
+      setSelected((prev) => ({ ...prev, academicId: '', sectionId: '' }));
+      setSections([]);
+      return;
+    }
+
+    const sectionsRes = await API.get(`/master/sections/${current.academicId}`);
+    const latestSections = dedupeSectionsByName(sectionsRes.data);
+    setSections(latestSections);
+
+    if (!current.sectionId) {
+      return;
+    }
+
+    const selectedSectionExists = latestSections.some((item) => item._id === current.sectionId);
+    if (!selectedSectionExists) {
+      setSelected((prev) => ({ ...prev, sectionId: '' }));
+    }
   }, []);
+
+  useEffect(() => {
+    syncHierarchyFromSelection().catch((err) => console.error(err));
+  }, [syncHierarchyFromSelection]);
+
+  useEffect(() => {
+    const refreshOnChange = () => {
+      syncHierarchyFromSelection().catch((err) => console.error(err));
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        refreshOnChange();
+      }
+    };
+
+    const handleStorage = (event) => {
+      if (event.key === MASTER_DATA_SYNC_KEY) {
+        refreshOnChange();
+      }
+    };
+
+    window.addEventListener(MASTER_DATA_UPDATED_EVENT, refreshOnChange);
+    window.addEventListener('focus', refreshOnChange);
+    window.addEventListener('storage', handleStorage);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener(MASTER_DATA_UPDATED_EVENT, refreshOnChange);
+      window.removeEventListener('focus', refreshOnChange);
+      window.removeEventListener('storage', handleStorage);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [syncHierarchyFromSelection]);
 
   // ================= DEPARTMENT CHANGE =================
   const handleDepartmentChange = async (e) => {
@@ -87,7 +216,7 @@ function GeneratorPage({ embedded = false }) {
     }));
 
     const res = await API.get(`/master/sections/${academicId}`);
-    setSections(res.data);
+    setSections(dedupeSectionsByName(res.data));
   };
 
   // ================= GENERATE TIMETABLE =================
@@ -127,13 +256,17 @@ function GeneratorPage({ embedded = false }) {
         responseType: 'blob'
       });
 
+      const contentDisposition = response.headers?.['content-disposition'] || '';
+      const filenameMatch = contentDisposition.match(/filename="?([^";]+)"?/i);
+      const filename = filenameMatch?.[1] || 'timetable.doc';
+
       const blob = new Blob([response.data], {
-        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        type: 'application/msword'
       });
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = 'timetable.xlsx';
+      link.download = filename;
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -255,7 +388,7 @@ function GeneratorPage({ embedded = false }) {
             onClick={handleDownload}
             disabled={!timetableId || isDownloading}
           >
-            {isDownloading ? 'Downloading...' : '⬇️ Download Timetable'}
+            {isDownloading ? 'Downloading...' : '⬇️ Download Timetable (Word)'}
           </button>
 
         </div>
@@ -313,7 +446,7 @@ function GeneratorPage({ embedded = false }) {
                       <td key={`${day}-${slot.label || slot.period || index}`}>
                         {slot.isBreak
                           ? 'Lunch'
-                          : subjectMap[timetable[day]?.[slot.period]?.subjectId] || '—'}
+                          : (subjectMap[timetable[day]?.[slot.period]?.subjectId] || 'Free Slot')}
                       </td>
                     ))}
 

@@ -5,13 +5,9 @@ const mongoose = require('mongoose');
 const Subject = require('../models/Subject');
 const Teacher = require('../models/Teacher');
 const Timetable = require('../models/Timetable');
-const Academic = require('../models/Academic');
-const Section = require('../models/Section');
-const Course = require('../models/Course');
 const SwapRequest = require('../models/SwapRequest');
 
 const generateTimetable = require('../utils/generateTimetable');
-const xlsx = require('xlsx');
 
 const DISPLAY_SLOTS = [
   { period: 1, label: 'P1', start: '09:30', end: '10:20' },
@@ -28,6 +24,7 @@ const DISPLAY_SLOTS = [
 const getSlotLabel = (period) => DISPLAY_SLOTS.find((slot) => slot.period === period)?.label || `P${period}`;
 
 const isValidId = (value) => mongoose.Types.ObjectId.isValid(String(value || ''));
+const normalizeTeacherName = (name) => String(name || '').trim().toLowerCase();
 
 router.post('/generate', async (req, res) => {
   const { departmentId, courseId, sectionId } = req.body;
@@ -37,27 +34,34 @@ router.post('/generate', async (req, res) => {
 
     const teachers = await Teacher.find({ departmentId });
 
-    const departmentCourses = await Course.find({ departmentId }).select('_id');
-    const departmentCourseIds = departmentCourses.map((course) => course._id);
-    const departmentAcademics = await Academic.find({ courseId: { $in: departmentCourseIds } }).select('_id');
-    const departmentAcademicIds = departmentAcademics.map((academic) => academic._id);
-    const departmentSections = await Section.find({ academicId: { $in: departmentAcademicIds } }).select('_id');
-    const otherSectionIds = departmentSections
-      .map((section) => section._id)
-      .filter((id) => id.toString() !== String(sectionId));
-
+    // Build existingTeacherSchedule across ALL departments to prevent cross-department conflicts
     const existingTeacherSchedule = new Set();
-    if (otherSectionIds.length) {
-      const otherTimetables = await Timetable.find({ sectionId: { $in: otherSectionIds } })
-        .populate('entries.subjectId', 'name')
-        .populate('entries.teacherId', '_id');
+    const existingTeacherScheduleByName = new Set();
+    
+    // Get all other timetables to check global teacher conflicts.
+    const allTimetablesRaw = await Timetable.find({ sectionId: { $ne: sectionId } })
+      .populate('entries.subjectId', 'name')
+      .populate('entries.teacherId', '_id name')
+      .sort({ createdAt: -1 });
 
-      for (const timetable of otherTimetables) {
-        for (const entry of timetable.entries) {
-          if (!entry?.teacherId || !entry?.subjectId) continue;
-          const teacherId = entry.teacherId._id.toString();
-          if (entry.day && entry.period) {
-            existingTeacherSchedule.add(`${teacherId}-${entry.day}-${entry.period}`);
+    const latestTimetableBySection = new Map();
+    for (const timetable of allTimetablesRaw) {
+      const key = String(timetable.sectionId || '');
+      if (!latestTimetableBySection.has(key)) {
+        latestTimetableBySection.set(key, timetable);
+      }
+    }
+    const allTimetables = Array.from(latestTimetableBySection.values());
+
+    for (const timetable of allTimetables) {
+      for (const entry of timetable.entries) {
+        if (!entry?.teacherId || !entry?.subjectId) continue;
+        const teacherId = entry.teacherId._id.toString();
+        if (entry.day && entry.period) {
+          existingTeacherSchedule.add(`${teacherId}-${entry.day}-${entry.period}`);
+          const teacherNameKey = normalizeTeacherName(entry.teacherId.name);
+          if (teacherNameKey) {
+            existingTeacherScheduleByName.add(`${teacherNameKey}-${entry.day}-${entry.period}`);
           }
         }
       }
@@ -92,13 +96,16 @@ router.post('/generate', async (req, res) => {
       classesPerSubjectPerWeek: 6,
       maxSubjectsPerTeacher: 4,
       maxSubjectsPerTeacherPerSection: 1,
-      existingTeacherSchedule
+      freeSlotsPerDay: 1,
+      existingTeacherSchedule,
+      existingTeacherScheduleByName
     });
 
-    const timetable = await Timetable.create({
-      sectionId,
-      entries
-    });
+    const timetable = await Timetable.findOneAndUpdate(
+      { sectionId },
+      { sectionId, entries },
+      { new: true, upsert: true, setDefaultsOnInsert: true }
+    );
 
     res.json({
       timetable,
@@ -123,56 +130,120 @@ router.get('/download/:id', async (req, res) => {
     }
 
     const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
-    const displaySlots = [
-      { period: 1, label: 'P1', start: '09:30', end: '10:20' },
-      { period: 2, label: 'P2', start: '10:20', end: '11:10' },
-      { period: 3, label: 'P3', start: '11:10', end: '12:00' },
-      { period: 4, label: 'P4', start: '12:00', end: '12:50' },
-      { label: 'Lunch', start: '12:50', end: '13:40', isBreak: true },
-      { period: 5, label: 'P5', start: '13:40', end: '14:30' },
-      { period: 6, label: 'P6', start: '14:30', end: '15:20' },
-      { period: 7, label: 'P7', start: '15:20', end: '16:10' }
-    ];
+    const displaySlots = DISPLAY_SLOTS;
 
     const entryMap = new Map();
     for (const entry of timetable.entries) {
       entryMap.set(`${entry.day}-${entry.period}`, entry);
     }
 
-    const rows = [];
+    const escapeHtml = (value) =>
+      String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+
+    const timetableHeaderCells = displaySlots
+      .map((slot) => {
+        const label = escapeHtml(slot.label || `P${slot.period}`);
+        const time = escapeHtml(`${slot.start} - ${slot.end}`);
+        return `<th><div>${label}</div><small>${time}</small></th>`;
+      })
+      .join('');
+
+    const timetableBodyRows = days
+      .map((day) => {
+        const cells = displaySlots
+          .map((slot) => {
+            if (slot.isBreak) {
+              return '<td>Lunch</td>';
+            }
+
+            const entry = entryMap.get(`${day}-${slot.period}`);
+            const subjectName = entry?.subjectId?.name || 'Free Slot';
+            return `<td>${escapeHtml(subjectName)}</td>`;
+          })
+          .join('');
+
+        return `<tr><td><b>${escapeHtml(day)}</b></td>${cells}</tr>`;
+      })
+      .join('');
+
+    const pairMap = new Map();
     for (const day of days) {
       for (const slot of displaySlots) {
-        if (slot.isBreak) {
-          rows.push({
-            Day: day,
-            Period: slot.label,
-            Time: `${slot.start} - ${slot.end}`,
-            Subject: 'Lunch',
-            Teacher: ''
-          });
-          continue;
-        }
-
+        if (slot.isBreak || !slot.period) continue;
         const entry = entryMap.get(`${day}-${slot.period}`);
-        rows.push({
-          Day: day,
-          Period: slot.label,
-          Time: `${slot.start} - ${slot.end}`,
-          Subject: entry?.subjectId?.name || '',
-          Teacher: entry?.teacherId?.name || ''
-        });
+        const subjectName = entry?.subjectId?.name;
+        const teacherName = entry?.teacherId?.name;
+        if (!subjectName || !teacherName) continue;
+
+        const key = `${subjectName}__${teacherName}`;
+        if (!pairMap.has(key)) {
+          pairMap.set(key, { subjectName, teacherName });
+        }
       }
     }
 
-    const workbook = xlsx.utils.book_new();
-    const worksheet = xlsx.utils.json_to_sheet(rows);
-    xlsx.utils.book_append_sheet(workbook, worksheet, 'Timetable');
+    const allocationRows = Array.from(pairMap.values())
+      .map((item) => `<tr><td>${escapeHtml(item.subjectName)}</td><td>${escapeHtml(item.teacherName)}</td></tr>`)
+      .join('');
 
-    const buffer = xlsx.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+    const sectionLabel = timetable.sectionId?.name || 'N/A';
+    const htmlDoc = `<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <style>
+      body { font-family: Calibri, Arial, sans-serif; color: #111; }
+      h1, h2 { margin: 0 0 8px 0; }
+      p { margin: 0 0 12px 0; }
+      table { border-collapse: collapse; width: 100%; margin: 10px 0 20px 0; }
+      th, td { border: 1px solid #8b8b8b; padding: 6px; font-size: 12px; text-align: center; vertical-align: middle; }
+      th { background: #f0f4f8; }
+      small { display: block; color: #444; font-size: 10px; margin-top: 2px; }
+      .meta { margin-bottom: 14px; }
+      .left { text-align: left; }
+    </style>
+  </head>
+  <body>
+    <h1>Timetable Generator</h1>
+    <p class="meta"><b>Section:</b> ${escapeHtml(sectionLabel)}</p>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Day</th>
+          ${timetableHeaderCells}
+        </tr>
+      </thead>
+      <tbody>
+        ${timetableBodyRows}
+      </tbody>
+    </table>
+
+    <h2>Course - Teacher Allocation</h2>
+    <table>
+      <thead>
+        <tr>
+          <th class="left">Course</th>
+          <th class="left">Teacher</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${allocationRows || '<tr><td colspan="2">No allocation data available</td></tr>'}
+      </tbody>
+    </table>
+  </body>
+</html>`;
+
+    const buffer = Buffer.from(htmlDoc, 'utf8');
     const sectionName = timetable.sectionId?.name ? `-${timetable.sectionId.name}` : '';
-    const filename = `timetable${sectionName}.xlsx`;
+    const filename = `timetable${sectionName}.doc`;
 
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Type', 'application/msword; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     return res.send(buffer);
   } catch (err) {
@@ -251,6 +322,60 @@ router.get('/section/:sectionId/latest', async (req, res) => {
     }
 
     return res.json({ timetable, displaySlots: DISPLAY_SLOTS });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/section/:sectionId/all', async (req, res) => {
+  const { sectionId } = req.params;
+  if (!isValidId(sectionId)) {
+    return res.status(400).json({ error: 'Invalid sectionId' });
+  }
+
+  try {
+    const timetables = await Timetable.find({ sectionId })
+      .populate('sectionId', 'name')
+      .sort({ createdAt: -1 });
+
+    const list = timetables.map((item) => {
+      const totalSlots = Array.isArray(item.entries) ? item.entries.length : 0;
+      const assignedSlots = Array.isArray(item.entries)
+        ? item.entries.filter((entry) => entry?.subjectId && entry?.teacherId).length
+        : 0;
+
+      return {
+        _id: item._id,
+        sectionId: item.sectionId?._id || sectionId,
+        sectionName: item.sectionId?.name || 'Unknown section',
+        createdAt: item.createdAt,
+        totalSlots,
+        assignedSlots
+      };
+    });
+
+    return res.json(list);
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/:timetableId', async (req, res) => {
+  const { timetableId } = req.params;
+  if (!isValidId(timetableId)) {
+    return res.status(400).json({ error: 'Invalid timetableId' });
+  }
+
+  try {
+    const deleted = await Timetable.findByIdAndDelete(timetableId);
+
+    if (!deleted) {
+      return res.status(404).json({ error: 'Timetable not found' });
+    }
+
+    await SwapRequest.deleteMany({ timetableId });
+
+    return res.json({ message: 'Timetable deleted successfully' });
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }
