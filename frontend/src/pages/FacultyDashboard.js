@@ -435,8 +435,8 @@ function FacultyDashboard() {
                         const item = sectionEntryMap.get(`${day}-${slot.period}`);
                         return (
                           <td key={`${day}-${slot.period}`}>
-                            <div>{item?.subjectName || '—'}</div>
-                            <small>{item?.teacherName || '—'}</small>
+                            <div>{item?.subjectName || 'Free Slot'}</div>
+                            <small>{item?.teacherName || ''}</small>
                           </td>
                         );
                       })}

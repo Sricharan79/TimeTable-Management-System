@@ -4,8 +4,8 @@ import './Sidebar.css';
 const MENU_BY_PORTAL = {
 	admin: [
 		{ id: 'dashboard', label: 'Admin Dashboard', icon: '📊' },
-		{ id: 'generator', label: 'Time Table Generator', icon: '📅' },
-		{ id: 'feedback', label: 'Student Feedback', icon: '📝' }
+		{ id: 'manage-data', label: 'Manage Data', icon: '🗂️' },
+		{ id: 'generator', label: 'Time Table Generator', icon: '📅' }
 	],
 	faculty: [
 		{ id: 'faculty', label: 'Faculty Dashboard', icon: '👩‍🏫' },
