@@ -5,6 +5,7 @@ const mongoose = require('mongoose');
 const Subject = require('../models/Subject');
 const Teacher = require('../models/Teacher');
 const Timetable = require('../models/Timetable');
+const Section = require('../models/Section');
 const SwapRequest = require('../models/SwapRequest');
 
 const generateTimetable = require('../utils/generateTimetable');
@@ -27,19 +28,44 @@ const isValidId = (value) => mongoose.Types.ObjectId.isValid(String(value || '')
 const normalizeTeacherName = (name) => String(name || '').trim().toLowerCase();
 
 router.post('/generate', async (req, res) => {
-  const { departmentId, courseId, sectionId } = req.body;
+  const { departmentId, courseId, academicId, sectionId } = req.body;
 
   try {
+    if (!isValidId(departmentId) || !isValidId(courseId)) {
+      return res.status(400).json({ error: 'departmentId and courseId are required' });
+    }
+
+    if (sectionId && !isValidId(sectionId)) {
+      return res.status(400).json({ error: 'Invalid sectionId' });
+    }
+
+    if (!sectionId && !isValidId(academicId)) {
+      return res.status(400).json({ error: 'academicId is required to generate all sections' });
+    }
+
     const subjects = await Subject.find({ courseId });
 
     const teachers = await Teacher.find({ departmentId });
+
+    const targetSections = sectionId
+      ? await Section.find({ _id: sectionId })
+      : await Section.find({ academicId }).sort({ name: 1 });
+
+    if (!targetSections.length) {
+      return res.status(404).json({ error: 'No sections found for the selected academic term' });
+    }
+
+    const targetSectionIds = targetSections.map((section) => section._id);
+    const teacherNameById = new Map(
+      teachers.map((teacher) => [teacher._id.toString(), teacher.name])
+    );
 
     // Build existingTeacherSchedule across ALL departments to prevent cross-department conflicts
     const existingTeacherSchedule = new Set();
     const existingTeacherScheduleByName = new Set();
     
     // Get all other timetables to check global teacher conflicts.
-    const allTimetablesRaw = await Timetable.find({ sectionId: { $ne: sectionId } })
+    const allTimetablesRaw = await Timetable.find({ sectionId: { $nin: targetSectionIds } })
       .populate('entries.subjectId', 'name')
       .populate('entries.teacherId', '_id name')
       .sort({ createdAt: -1 });
@@ -90,27 +116,46 @@ router.post('/generate', async (req, res) => {
       { period: 8, label: 'P8', start: '15:50', end: '16:40' }
     ];
 
-    const { entries, remainingBySubject } = generateTimetable(subjects, teachers, {
-      timeSlots: teachingSlots,
-      maxClassesPerSubjectPerDay: 2,
-      classesPerSubjectPerWeek: 6,
-      maxSubjectsPerTeacher: 4,
-      maxSubjectsPerTeacherPerSection: 1,
-      freeSlotsPerDay: 1,
-      existingTeacherSchedule,
-      existingTeacherScheduleByName
-    });
+    const generatedTimetables = [];
+    for (const section of targetSections) {
+      const { entries, remainingBySubject } = generateTimetable(subjects, teachers, {
+        timeSlots: teachingSlots,
+        maxClassesPerSubjectPerDay: 2,
+        classesPerSubjectPerWeek: 6,
+        maxSubjectsPerTeacher: 4,
+        maxSubjectsPerTeacherPerSection: 1,
+        freeSlotsPerDay: 1,
+        existingTeacherSchedule,
+        existingTeacherScheduleByName
+      });
 
-    const timetable = await Timetable.findOneAndUpdate(
-      { sectionId },
-      { sectionId, entries },
-      { new: true, upsert: true, setDefaultsOnInsert: true }
-    );
+      const timetable = await Timetable.findOneAndUpdate(
+        { sectionId: section._id },
+        { sectionId: section._id, entries },
+        { new: true, upsert: true, setDefaultsOnInsert: true }
+      );
+
+      for (const entry of entries) {
+        if (!entry?.teacherId || !entry?.day || !entry?.period) continue;
+        const teacherId = entry.teacherId.toString();
+        existingTeacherSchedule.add(`${teacherId}-${entry.day}-${entry.period}`);
+        const teacherName = teacherNameById.get(teacherId);
+        const teacherNameKey = normalizeTeacherName(teacherName);
+        if (teacherNameKey) {
+          existingTeacherScheduleByName.add(`${teacherNameKey}-${entry.day}-${entry.period}`);
+        }
+      }
+
+      generatedTimetables.push({
+        section,
+        timetable,
+        remainingBySubject
+      });
+    }
 
     res.json({
-      timetable,
-      displaySlots,
-      remainingBySubject
+      timetables: generatedTimetables,
+      displaySlots
     });
 
   } catch (err) {

@@ -4,22 +4,11 @@ import { MASTER_DATA_SYNC_KEY, MASTER_DATA_UPDATED_EVENT } from '../services/dat
 import auroraLogo from '../assets/image.png';
 import './styles.css';
 
-const dedupeSectionsByName = (items = []) => {
-  const seen = new Set();
-  return items.filter((section) => {
-    const key = String(section?.name || '').trim().toLowerCase();
-    if (!key || seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-};
-
 function GeneratorPage({ embedded = false }) {
 
   const [departments, setDepartments] = useState([]);
   const [courses, setCourses] = useState([]);
   const [academics, setAcademics] = useState([]);
-  const [sections, setSections] = useState([]);
 
   const [subjects, setSubjects] = useState([]);
   const [teachers, setTeachers] = useState([]);
@@ -27,15 +16,12 @@ function GeneratorPage({ embedded = false }) {
   const [selected, setSelected] = useState({
     departmentId: '',
     courseId: '',
-    academicId: '',
-    sectionId: ''
+    academicId: ''
   });
 
-  const [timetable, setTimetable] = useState({});
+  const [generatedTimetables, setGeneratedTimetables] = useState([]);
   const [displaySlots, setDisplaySlots] = useState([]);
-  const [timetableId, setTimetableId] = useState('');
-  const [remainingBySubject, setRemainingBySubject] = useState({});
-  const [isDownloading, setIsDownloading] = useState(false);
+  const [downloadingId, setDownloadingId] = useState('');
   const [downloadError, setDownloadError] = useState('');
   const selectedRef = useRef(selected);
 
@@ -59,18 +45,16 @@ function GeneratorPage({ embedded = false }) {
       setTeachers([]);
       setAcademics([]);
       setSubjects([]);
-      setSections([]);
       return;
     }
 
     const selectedDepartmentExists = latestDepartments.some((item) => item._id === current.departmentId);
     if (!selectedDepartmentExists) {
-      setSelected({ departmentId: '', courseId: '', academicId: '', sectionId: '' });
+      setSelected({ departmentId: '', courseId: '', academicId: '' });
       setCourses([]);
       setTeachers([]);
       setAcademics([]);
       setSubjects([]);
-      setSections([]);
       return;
     }
 
@@ -85,16 +69,14 @@ function GeneratorPage({ embedded = false }) {
     if (!current.courseId) {
       setAcademics([]);
       setSubjects([]);
-      setSections([]);
       return;
     }
 
     const selectedCourseExists = latestCourses.some((item) => item._id === current.courseId);
     if (!selectedCourseExists) {
-      setSelected((prev) => ({ ...prev, courseId: '', academicId: '', sectionId: '' }));
+      setSelected((prev) => ({ ...prev, courseId: '', academicId: '' }));
       setAcademics([]);
       setSubjects([]);
-      setSections([]);
       return;
     }
 
@@ -107,28 +89,11 @@ function GeneratorPage({ embedded = false }) {
     setSubjects(subjectsRes.data);
 
     if (!current.academicId) {
-      setSections([]);
       return;
     }
-
     const selectedAcademicExists = latestAcademics.some((item) => item._id === current.academicId);
     if (!selectedAcademicExists) {
-      setSelected((prev) => ({ ...prev, academicId: '', sectionId: '' }));
-      setSections([]);
-      return;
-    }
-
-    const sectionsRes = await API.get(`/master/sections/${current.academicId}`);
-    const latestSections = dedupeSectionsByName(sectionsRes.data);
-    setSections(latestSections);
-
-    if (!current.sectionId) {
-      return;
-    }
-
-    const selectedSectionExists = latestSections.some((item) => item._id === current.sectionId);
-    if (!selectedSectionExists) {
-      setSelected((prev) => ({ ...prev, sectionId: '' }));
+      setSelected((prev) => ({ ...prev, academicId: '' }));
     }
   }, []);
 
@@ -173,8 +138,7 @@ function GeneratorPage({ embedded = false }) {
     setSelected({
       departmentId,
       courseId: '',
-      academicId: '',
-      sectionId: ''
+      academicId: ''
     });
 
     const res = await API.get(`/master/courses/${departmentId}`);
@@ -182,7 +146,6 @@ function GeneratorPage({ embedded = false }) {
     const resTeachers = await API.get(`/master/teachers/${departmentId}`);
     setTeachers(resTeachers.data);
     setAcademics([]);
-    setSections([]);
   };
 
   // ================= COURSE CHANGE =================
@@ -192,8 +155,7 @@ function GeneratorPage({ embedded = false }) {
     setSelected(prev => ({
       ...prev,
       courseId,
-      academicId: '',
-      sectionId: ''
+      academicId: ''
     }));
 
     const res1 = await API.get(`/master/academic/${courseId}`);
@@ -201,8 +163,6 @@ function GeneratorPage({ embedded = false }) {
 
     const res2 = await API.get(`/master/subjects/${courseId}`);
     setSubjects(res2.data);
-
-    setSections([]);
   };
 
   // ================= ACADEMIC CHANGE =================
@@ -211,48 +171,50 @@ function GeneratorPage({ embedded = false }) {
 
     setSelected(prev => ({
       ...prev,
-      academicId,
-      sectionId: ''
+      academicId
     }));
-
-    const res = await API.get(`/master/sections/${academicId}`);
-    setSections(dedupeSectionsByName(res.data));
   };
 
   // ================= GENERATE TIMETABLE =================
   const handleGenerate = async () => {
+    setDownloadError('');
     const res = await API.post('/timetable/generate', {
       departmentId: selected.departmentId,
       courseId: selected.courseId,
-      sectionId: selected.sectionId
+      academicId: selected.academicId
     });
 
-    const { timetable: timetableDoc, displaySlots: slots, remainingBySubject: remaining } = res.data;
-    const data = timetableDoc.entries;
+    const { timetables: timetableRows = [], displaySlots: slots } = res.data;
 
-    const formatted = {};
+    const formattedRows = timetableRows.map((item) => {
+      const data = item?.timetable?.entries || [];
+      const formatted = {};
 
-    data.forEach(item => {
-      if (!formatted[item.day]) formatted[item.day] = {};
-      formatted[item.day][item.period] = {
-        subjectId: item.subjectId,
-        teacherId: item.teacherId
+      data.forEach((entry) => {
+        if (!formatted[entry.day]) formatted[entry.day] = {};
+        formatted[entry.day][entry.period] = {
+          subjectId: entry.subjectId,
+          teacherId: entry.teacherId
+        };
+      });
+
+      return {
+        ...item,
+        formattedTimetable: formatted
       };
     });
 
-    setTimetable(formatted);
+    setGeneratedTimetables(formattedRows);
     setDisplaySlots(slots || []);
-    setTimetableId(timetableDoc._id || '');
-    setRemainingBySubject(remaining || {});
   };
 
-  const handleDownload = async () => {
-    if (!timetableId) return;
+  const handleDownload = async (id) => {
+    if (!id) return;
 
     try {
-      setIsDownloading(true);
+      setDownloadingId(id);
       setDownloadError('');
-      const response = await API.get(`/timetable/download/${timetableId}`, {
+      const response = await API.get(`/timetable/download/${id}`, {
         responseType: 'blob'
       });
 
@@ -274,7 +236,7 @@ function GeneratorPage({ embedded = false }) {
     } catch (error) {
       setDownloadError(error.response?.data?.error || 'Download failed.');
     } finally {
-      setIsDownloading(false);
+      setDownloadingId('');
     }
   };
 
@@ -305,20 +267,11 @@ function GeneratorPage({ embedded = false }) {
   const canGenerate =
     selected.departmentId &&
     selected.courseId &&
-    selected.academicId &&
-    selected.sectionId;
+    selected.academicId;
 
   const selectedDepartment = departments.find((dep) => dep._id === selected.departmentId);
   const selectedCourse = courses.find((course) => course._id === selected.courseId);
   const selectedAcademic = academics.find((academic) => academic._id === selected.academicId);
-  const selectedSection = sections.find((section) => section._id === selected.sectionId);
-
-  const remainingItems = Object.entries(remainingBySubject)
-    .filter(([, remaining]) => remaining > 0)
-    .map(([subjectId, remaining]) => ({
-      name: subjectMap[subjectId] || 'Unknown subject',
-      remaining
-    }));
 
   return (
     <div className={`generator-page ${embedded ? 'generator-embedded' : ''}`}>
@@ -365,36 +318,26 @@ function GeneratorPage({ embedded = false }) {
             ))}
           </select>
 
-          {/* Section */}
-          <select
-            value={selected.sectionId}
-            onChange={(e) =>
-              setSelected(prev => ({ ...prev, sectionId: e.target.value }))
-            }
-            disabled={!selected.academicId}
-          >
-            <option value="">Select Section</option>
-            {sections.map(s => (
-              <option key={s._id} value={s._id}>{s.name}</option>
-            ))}
-          </select>
-
           <button className="generate-btn" onClick={handleGenerate} disabled={!canGenerate}>
            Generate Timetable
           </button>
 
           <button
             className="generate-btn download-btn"
-            onClick={handleDownload}
-            disabled={!timetableId || isDownloading}
+            onClick={() => {
+              if (generatedTimetables.length === 1) {
+                handleDownload(generatedTimetables[0]?.timetable?._id);
+              }
+            }}
+            disabled={generatedTimetables.length !== 1 || downloadingId === generatedTimetables[0]?.timetable?._id}
           >
-            {isDownloading ? 'Downloading...' : '⬇️ Download Timetable (Word)'}
+            {downloadingId ? 'Downloading...' : '⬇️ Download Timetable (Word)'}
           </button>
 
         </div>
 
         {/* ================= TABLE ================= */}
-        {Object.keys(timetable).length > 0 && (
+        {generatedTimetables.length > 0 && (
           <div className="selection-summary">
             <div className="summary-item">
               <span>School</span>
@@ -412,112 +355,139 @@ function GeneratorPage({ embedded = false }) {
               <span>Term</span>
               <strong>{selectedAcademic?.semester ? `Term ${selectedAcademic.semester}` : '—'}</strong>
             </div>
-            <div className="summary-item">
-              <span>Section</span>
-              <strong>{selectedSection?.name || '—'}</strong>
-            </div>
           </div>
         )}
 
-        {Object.keys(timetable).length > 0 && (
-          <div className="table-shell">
-            <table className="timetable">
-
-              <thead>
-                <tr>
-                  <th>Day</th>
-                  {slotColumns.map((slot, index) => (
-                    <th key={slot.label || slot.period || index}>
-                      <div className="slot-header">
-                        <span>{slot.label || `P${slot.period}`}</span>
-                        <small>{slot.start} - {slot.end}</small>
-                      </div>
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-
-              <tbody>
-                {days.map(day => (
-                  <tr key={day}>
-                    <td><b>{day}</b></td>
-
-                    {slotColumns.map((slot, index) => (
-                      <td key={`${day}-${slot.label || slot.period || index}`}>
-                        {slot.isBreak
-                          ? 'Lunch'
-                          : (subjectMap[timetable[day]?.[slot.period]?.subjectId] || 'Free Slot')}
-                      </td>
-                    ))}
-
-                  </tr>
-                ))}
-              </tbody>
-
-            </table>
-          </div>
-        )}
-
-        {Object.keys(timetable).length === 0 && (
+        {generatedTimetables.length === 0 && (
           <div className="empty-state" role="status" aria-live="polite">
             <h3>Ready to Generate Timetable</h3>
-            <p>Select department, course, year/term, and section, then click Generate Timetable.</p>
+            <p>Select department, course, and year/term, then click Generate Timetable.</p>
           </div>
         )}
 
         {downloadError && <div className="download-error">{downloadError}</div>}
 
-        {remainingItems.length > 0 && (
-          <div className="remaining-panel">
-            <h3>Remaining Classes (per week)</h3>
-            <div className="remaining-grid">
-              {remainingItems.map((item) => (
-                <div key={item.name} className="remaining-card">
-                  <span>{item.name}</span>
-                  <strong>{item.remaining}</strong>
+        {generatedTimetables.map((item, index) => {
+          const formatted = item.formattedTimetable || {};
+          const remainingItems = Object.entries(item.remainingBySubject || {})
+            .filter(([, remaining]) => remaining > 0)
+            .map(([subjectId, remaining]) => ({
+              name: subjectMap[subjectId] || 'Unknown subject',
+              remaining
+            }));
+
+          return (
+            <div key={item?.timetable?._id || item?.section?._id || index}>
+              <div className="selection-summary">
+                <div className="summary-item">
+                  <span>Section</span>
+                  <strong>{item?.section?.name || '—'}</strong>
                 </div>
-              ))}
-            </div>
-          </div>
-        )}
+                <div className="summary-item">
+                  <span>Download</span>
+                  <button
+                    className="generate-btn download-btn"
+                    onClick={() => handleDownload(item?.timetable?._id)}
+                    disabled={!item?.timetable?._id || downloadingId === item?.timetable?._id}
+                  >
+                    {downloadingId === item?.timetable?._id ? 'Downloading...' : '⬇️ Download Timetable (Word)'}
+                  </button>
+                </div>
+              </div>
 
-        {Object.keys(timetable).length > 0 && (
-          <div className="teacher-panel">
-            <h3>Course - Teacher Allocation</h3>
-            <table className="teacher-table">
-              <thead>
-                <tr>
-                  <th>Course</th>
-                  <th>Teacher</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(() => {
-                  const pairs = new Map();
-                  Object.values(timetable).forEach((daySlots) => {
-                    Object.values(daySlots).forEach((slot) => {
-                      if (!slot?.subjectId || !slot?.teacherId) return;
-                      const key = `${slot.subjectId}-${slot.teacherId}`;
-                      if (!pairs.has(key)) {
-                        pairs.set(key, {
-                          subjectName: subjectMap[slot.subjectId] || '—',
-                          teacherName: teacherMap[slot.teacherId] || '—'
-                        });
-                      }
-                    });
-                  });
-
-                  return Array.from(pairs.entries()).map(([key, item]) => (
-                    <tr key={key}>
-                      <td>{item.subjectName}</td>
-                      <td>{item.teacherName}</td>
+              <div className="table-shell">
+                <table className="timetable">
+                  <thead>
+                    <tr>
+                      <th>Day</th>
+                      {slotColumns.map((slot, slotIndex) => (
+                        <th key={slot.label || slot.period || slotIndex}>
+                          <div className="slot-header">
+                            <span>{slot.label || `P${slot.period}`}</span>
+                            <small>{slot.start} - {slot.end}</small>
+                          </div>
+                        </th>
+                      ))}
                     </tr>
-                  ));
-                })()}
-              </tbody>
-            </table>
-          </div>
-        )}
+                  </thead>
+
+                  <tbody>
+                    {days.map((day) => (
+                      <tr key={day}>
+                        <td><b>{day}</b></td>
+                        {slotColumns.map((slot, slotIndex) => (
+                          <td key={`${day}-${slot.label || slot.period || slotIndex}`}>
+                            {slot.isBreak
+                              ? 'Lunch'
+                              : (subjectMap[formatted[day]?.[slot.period]?.subjectId] || 'Free Slot')}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {remainingItems.length > 0 && (
+                <div className="remaining-panel">
+                  <h3>Remaining Classes (per week)</h3>
+                  <div className="remaining-grid">
+                    {remainingItems.map((remainingItem) => (
+                      <div key={`${item?.section?._id || index}-${remainingItem.name}`} className="remaining-card">
+                        <span>{remainingItem.name}</span>
+                        <strong>{remainingItem.remaining}</strong>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="teacher-panel">
+                <h3>Course - Teacher Allocation</h3>
+                <table className="teacher-table">
+                  <thead>
+                    <tr>
+                      <th>Course</th>
+                      <th>Teacher</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(() => {
+                      const pairs = new Map();
+                      Object.values(formatted).forEach((daySlots) => {
+                        Object.values(daySlots).forEach((slot) => {
+                          if (!slot?.subjectId || !slot?.teacherId) return;
+                          const key = `${slot.subjectId}-${slot.teacherId}`;
+                          if (!pairs.has(key)) {
+                            pairs.set(key, {
+                              subjectName: subjectMap[slot.subjectId] || '—',
+                              teacherName: teacherMap[slot.teacherId] || '—'
+                            });
+                          }
+                        });
+                      });
+
+                      if (!pairs.size) {
+                        return (
+                          <tr>
+                            <td colSpan={2}>No allocation data available</td>
+                          </tr>
+                        );
+                      }
+
+                      return Array.from(pairs.entries()).map(([key, pairItem]) => (
+                        <tr key={key}>
+                          <td>{pairItem.subjectName}</td>
+                          <td>{pairItem.teacherName}</td>
+                        </tr>
+                      ));
+                    })()}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          );
+        })}
 
       </div>
 
