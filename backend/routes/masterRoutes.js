@@ -10,10 +10,50 @@ const Academic = require('../models/Academic');
 const Section = require('../models/Section');
 const Subject = require('../models/Subject');
 const Teacher = require('../models/Teacher');
+const Timetable = require('../models/Timetable');
 
 const upload = multer({ storage: multer.memoryStorage() });
 
 const normalizeText = (value) => String(value ?? '').trim();
+
+const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const findDepartmentByNameInsensitive = async (name) => {
+  const normalized = normalizeText(name);
+  if (!normalized) return null;
+
+  return Department.findOne({
+    name: { $regex: `^${escapeRegExp(normalized)}$`, $options: 'i' }
+  });
+};
+
+const findCourseByNameInsensitive = async (name, departmentId) => {
+  const normalized = normalizeText(name);
+  if (!normalized || !departmentId) return null;
+
+  return Course.findOne({
+    departmentId,
+    name: { $regex: `^${escapeRegExp(normalized)}$`, $options: 'i' }
+  });
+};
+
+const findSectionByNameInsensitive = async (name, academicId) => {
+  const normalized = normalizeText(name);
+  if (!normalized || !academicId) return null;
+
+  return Section.findOne({
+    academicId,
+    name: { $regex: `^${escapeRegExp(normalized)}$`, $options: 'i' }
+  });
+};
+
+const findAcademicDuplicate = async (courseId, year, semester) => {
+  if (!courseId || year === null || year === undefined || semester === null || semester === undefined) {
+    return null;
+  }
+
+  return Academic.findOne({ courseId, year, semester });
+};
 
 const parseRawTextToRows = (rawText) => {
   const lines = rawText
@@ -90,12 +130,22 @@ const importRowsByEntity = async (entity, rows, context = {}) => {
         const name = normalizeText(getCaseInsensitive(row, 'name'));
         if (!name) throw new Error('name is required');
 
+        const existingDepartment = await findDepartmentByNameInsensitive(name);
+        if (existingDepartment) {
+          throw new Error('department already exists');
+        }
+
         const created = await Department.create({ name });
         imported.push(created);
       } else if (entity === 'course') {
         const name = normalizeText(getCaseInsensitive(row, 'name'));
         const currentDepartmentId = normalizeText(getCaseInsensitive(row, 'departmentId')) || departmentId;
         if (!name || !currentDepartmentId) throw new Error('name and departmentId are required');
+
+        const existingCourse = await findCourseByNameInsensitive(name, currentDepartmentId);
+        if (existingCourse) {
+          throw new Error('program already exists for this department');
+        }
 
         const created = await Course.create({
           name,
@@ -110,6 +160,11 @@ const importRowsByEntity = async (entity, rows, context = {}) => {
           throw new Error('courseId, year and semester are required');
         }
 
+        const existingAcademic = await findAcademicDuplicate(currentCourseId, year, semester);
+        if (existingAcademic) {
+          throw new Error('year/term already exists for this program');
+        }
+
         const created = await Academic.create({
           courseId: currentCourseId,
           year,
@@ -120,6 +175,11 @@ const importRowsByEntity = async (entity, rows, context = {}) => {
         const name = normalizeText(getCaseInsensitive(row, 'name'));
         const currentAcademicId = normalizeText(getCaseInsensitive(row, 'academicId')) || academicId;
         if (!name || !currentAcademicId) throw new Error('name and academicId are required');
+
+        const existingSection = await findSectionByNameInsensitive(name, currentAcademicId);
+        if (existingSection) {
+          throw new Error('section already exists for this year/term');
+        }
 
         const created = await Section.create({
           name,
@@ -313,7 +373,18 @@ router.post('/upload', upload.single('file'), async (req, res) => {
 // Add Department
 router.post('/department', async (req, res) => {
   try {
-    const data = await Department.create(req.body);
+    const name = normalizeText(req.body?.name);
+
+    if (!name) {
+      return res.status(400).json({ error: 'Department name is required' });
+    }
+
+    const existingDepartment = await findDepartmentByNameInsensitive(name);
+    if (existingDepartment) {
+      return res.status(409).json({ error: 'Department already exists' });
+    }
+
+    const data = await Department.create({ ...req.body, name });
     res.json(data);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -323,7 +394,23 @@ router.post('/department', async (req, res) => {
 // Add Course
 router.post('/course', async (req, res) => {
   try {
-    const data = await Course.create(req.body);
+    const name = normalizeText(req.body?.name);
+    const departmentId = req.body?.departmentId;
+
+    if (!name || !departmentId) {
+      return res.status(400).json({ error: 'name and departmentId are required' });
+    }
+
+    const existingCourse = await findCourseByNameInsensitive(name, departmentId);
+    if (existingCourse) {
+      return res.status(409).json({ error: 'Program already exists for this department' });
+    }
+
+    const data = await Course.create({
+      ...req.body,
+      name,
+      departmentId
+    });
     res.json(data);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -333,7 +420,25 @@ router.post('/course', async (req, res) => {
 // Add Academic
 router.post('/academic', async (req, res) => {
   try {
-    const data = await Academic.create(req.body);
+    const courseId = req.body?.courseId;
+    const year = toNumber(req.body?.year);
+    const semester = toNumber(req.body?.semester);
+
+    if (!courseId || year === null || semester === null) {
+      return res.status(400).json({ error: 'courseId, year and semester are required' });
+    }
+
+    const existingAcademic = await findAcademicDuplicate(courseId, year, semester);
+    if (existingAcademic) {
+      return res.status(409).json({ error: 'Year/Term already exists for this program' });
+    }
+
+    const data = await Academic.create({
+      ...req.body,
+      courseId,
+      year,
+      semester
+    });
     res.json(data);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -343,7 +448,23 @@ router.post('/academic', async (req, res) => {
 // Add Section
 router.post('/section', async (req, res) => {
   try {
-    const data = await Section.create(req.body);
+    const name = normalizeText(req.body?.name);
+    const academicId = req.body?.academicId;
+
+    if (!name || !academicId) {
+      return res.status(400).json({ error: 'name and academicId are required' });
+    }
+
+    const existingSection = await findSectionByNameInsensitive(name, academicId);
+    if (existingSection) {
+      return res.status(409).json({ error: 'Section already exists for this year/term' });
+    }
+
+    const data = await Section.create({
+      ...req.body,
+      name,
+      academicId
+    });
     res.json(data);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -367,6 +488,362 @@ router.post('/teacher', async (req, res) => {
     res.json(data);
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// =====================
+// ✅ UPDATE ROUTES
+// =====================
+
+router.put('/department/:id', async (req, res) => {
+  try {
+    const name = normalizeText(req.body?.name);
+    if (!name) {
+      return res.status(400).json({ error: 'Department name is required' });
+    }
+
+    const existingDepartment = await findDepartmentByNameInsensitive(name);
+    if (existingDepartment && String(existingDepartment._id) !== String(req.params.id)) {
+      return res.status(409).json({ error: 'Department already exists' });
+    }
+
+    const data = await Department.findByIdAndUpdate(
+      req.params.id,
+      { name },
+      { new: true, runValidators: true }
+    );
+
+    if (!data) {
+      return res.status(404).json({ error: 'Department not found' });
+    }
+
+    return res.json(data);
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+router.put('/course/:id', async (req, res) => {
+  try {
+    const payload = {
+      name: normalizeText(req.body?.name),
+      departmentId: req.body?.departmentId
+    };
+
+    if (!payload.name || !payload.departmentId) {
+      return res.status(400).json({ error: 'name and departmentId are required' });
+    }
+
+    const existingCourse = await findCourseByNameInsensitive(payload.name, payload.departmentId);
+    if (existingCourse && String(existingCourse._id) !== String(req.params.id)) {
+      return res.status(409).json({ error: 'Program already exists for this department' });
+    }
+
+    const data = await Course.findByIdAndUpdate(req.params.id, payload, {
+      new: true,
+      runValidators: true
+    });
+
+    if (!data) {
+      return res.status(404).json({ error: 'Program not found' });
+    }
+
+    return res.json(data);
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+router.put('/academic/:id', async (req, res) => {
+  try {
+    const payload = {
+      courseId: req.body?.courseId,
+      year: toNumber(req.body?.year),
+      semester: toNumber(req.body?.semester)
+    };
+
+    if (!payload.courseId || payload.year === null || payload.semester === null) {
+      return res.status(400).json({ error: 'courseId, year and semester are required' });
+    }
+
+    const existingAcademic = await findAcademicDuplicate(payload.courseId, payload.year, payload.semester);
+    if (existingAcademic && String(existingAcademic._id) !== String(req.params.id)) {
+      return res.status(409).json({ error: 'Year/Term already exists for this program' });
+    }
+
+    const data = await Academic.findByIdAndUpdate(req.params.id, payload, {
+      new: true,
+      runValidators: true
+    });
+
+    if (!data) {
+      return res.status(404).json({ error: 'Year/Term not found' });
+    }
+
+    return res.json(data);
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+router.put('/section/:id', async (req, res) => {
+  try {
+    const payload = {
+      name: normalizeText(req.body?.name),
+      academicId: req.body?.academicId
+    };
+
+    if (!payload.name || !payload.academicId) {
+      return res.status(400).json({ error: 'name and academicId are required' });
+    }
+
+    const existingSection = await findSectionByNameInsensitive(payload.name, payload.academicId);
+    if (existingSection && String(existingSection._id) !== String(req.params.id)) {
+      return res.status(409).json({ error: 'Section already exists for this year/term' });
+    }
+
+    const data = await Section.findByIdAndUpdate(req.params.id, payload, {
+      new: true,
+      runValidators: true
+    });
+
+    if (!data) {
+      return res.status(404).json({ error: 'Section not found' });
+    }
+
+    return res.json(data);
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+router.put('/subject/:id', async (req, res) => {
+  try {
+    const payload = {
+      name: normalizeText(req.body?.name),
+      courseId: req.body?.courseId
+    };
+
+    if (!payload.name || !payload.courseId) {
+      return res.status(400).json({ error: 'name and courseId are required' });
+    }
+
+    const data = await Subject.findByIdAndUpdate(req.params.id, payload, {
+      new: true,
+      runValidators: true
+    });
+
+    if (!data) {
+      return res.status(404).json({ error: 'Subject not found' });
+    }
+
+    return res.json(data);
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+router.put('/teacher/:id', async (req, res) => {
+  try {
+    const payload = {
+      name: normalizeText(req.body?.name),
+      departmentId: req.body?.departmentId,
+      subjects: Array.isArray(req.body?.subjects) ? req.body.subjects : []
+    };
+
+    if (!payload.name || !payload.departmentId) {
+      return res.status(400).json({ error: 'name and departmentId are required' });
+    }
+
+    const data = await Teacher.findByIdAndUpdate(req.params.id, payload, {
+      new: true,
+      runValidators: true
+    }).populate('subjects');
+
+    if (!data) {
+      return res.status(404).json({ error: 'Teacher not found' });
+    }
+
+    return res.json(data);
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// =====================
+// ✅ DELETE ROUTES
+// =====================
+
+router.delete('/department/:id', async (req, res) => {
+  try {
+    const department = await Department.findById(req.params.id);
+    if (!department) {
+      return res.status(404).json({ error: 'Department not found' });
+    }
+
+    const courses = await Course.find({ departmentId: req.params.id }, { _id: 1 });
+    const courseIds = courses.map((item) => item._id);
+
+    const academics = await Academic.find({ courseId: { $in: courseIds } }, { _id: 1 });
+    const academicIds = academics.map((item) => item._id);
+
+    const sections = await Section.find({ academicId: { $in: academicIds } }, { _id: 1 });
+    const sectionIds = sections.map((item) => item._id);
+
+    const subjects = await Subject.find({ courseId: { $in: courseIds } }, { _id: 1 });
+    const subjectIds = subjects.map((item) => item._id);
+
+    if (subjectIds.length) {
+      await Teacher.updateMany(
+        { subjects: { $in: subjectIds } },
+        { $pull: { subjects: { $in: subjectIds } } }
+      );
+      await Timetable.updateMany(
+        { 'entries.subjectId': { $in: subjectIds } },
+        { $pull: { entries: { subjectId: { $in: subjectIds } } } }
+      );
+    }
+
+    if (sectionIds.length) {
+      await Timetable.deleteMany({ sectionId: { $in: sectionIds } });
+    }
+
+    await Teacher.deleteMany({ departmentId: req.params.id });
+    await Subject.deleteMany({ courseId: { $in: courseIds } });
+    await Section.deleteMany({ academicId: { $in: academicIds } });
+    await Academic.deleteMany({ courseId: { $in: courseIds } });
+    await Course.deleteMany({ departmentId: req.params.id });
+    await Department.findByIdAndDelete(req.params.id);
+
+    return res.json({ message: 'Department and all linked records deleted successfully' });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/course/:id', async (req, res) => {
+  try {
+    const course = await Course.findById(req.params.id);
+    if (!course) {
+      return res.status(404).json({ error: 'Program not found' });
+    }
+
+    const academics = await Academic.find({ courseId: req.params.id }, { _id: 1 });
+    const academicIds = academics.map((item) => item._id);
+
+    const sections = await Section.find({ academicId: { $in: academicIds } }, { _id: 1 });
+    const sectionIds = sections.map((item) => item._id);
+
+    const subjects = await Subject.find({ courseId: req.params.id }, { _id: 1 });
+    const subjectIds = subjects.map((item) => item._id);
+
+    if (subjectIds.length) {
+      await Teacher.updateMany(
+        { subjects: { $in: subjectIds } },
+        { $pull: { subjects: { $in: subjectIds } } }
+      );
+      await Timetable.updateMany(
+        { 'entries.subjectId': { $in: subjectIds } },
+        { $pull: { entries: { subjectId: { $in: subjectIds } } } }
+      );
+    }
+
+    if (sectionIds.length) {
+      await Timetable.deleteMany({ sectionId: { $in: sectionIds } });
+    }
+
+    await Subject.deleteMany({ courseId: req.params.id });
+    await Section.deleteMany({ academicId: { $in: academicIds } });
+    await Academic.deleteMany({ courseId: req.params.id });
+    await Course.findByIdAndDelete(req.params.id);
+
+    return res.json({ message: 'Program and all linked records deleted successfully' });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/academic/:id', async (req, res) => {
+  try {
+    const academic = await Academic.findById(req.params.id);
+    if (!academic) {
+      return res.status(404).json({ error: 'Year/Term not found' });
+    }
+
+    const sections = await Section.find({ academicId: req.params.id }, { _id: 1 });
+    const sectionIds = sections.map((item) => item._id);
+
+    if (sectionIds.length) {
+      await Timetable.deleteMany({ sectionId: { $in: sectionIds } });
+      await Section.deleteMany({ academicId: req.params.id });
+    }
+
+    await Academic.findByIdAndDelete(req.params.id);
+
+    return res.json({ message: 'Year/Term and linked sections deleted successfully' });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/section/:id', async (req, res) => {
+  try {
+    const section = await Section.findById(req.params.id);
+    if (!section) {
+      return res.status(404).json({ error: 'Section not found' });
+    }
+
+    await Timetable.deleteMany({ sectionId: req.params.id });
+    await Section.findByIdAndDelete(req.params.id);
+
+    return res.json({ message: 'Section and linked timetables deleted successfully' });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/subject/:id', async (req, res) => {
+  try {
+    const subject = await Subject.findById(req.params.id);
+    if (!subject) {
+      return res.status(404).json({ error: 'Subject not found' });
+    }
+
+    await Teacher.updateMany(
+      { subjects: req.params.id },
+      { $pull: { subjects: req.params.id } }
+    );
+
+    await Timetable.updateMany(
+      { 'entries.subjectId': req.params.id },
+      { $pull: { entries: { subjectId: req.params.id } } }
+    );
+
+    await Subject.findByIdAndDelete(req.params.id);
+
+    return res.json({ message: 'Subject and linked references deleted successfully' });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/teacher/:id', async (req, res) => {
+  try {
+    const teacher = await Teacher.findById(req.params.id);
+    if (!teacher) {
+      return res.status(404).json({ error: 'Teacher not found' });
+    }
+
+    await Timetable.updateMany(
+      { 'entries.teacherId': req.params.id },
+      { $pull: { entries: { teacherId: req.params.id } } }
+    );
+
+    await Teacher.findByIdAndDelete(req.params.id);
+
+    return res.json({ message: 'Teacher and linked timetable references deleted successfully' });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
   }
 });
 
@@ -440,6 +917,15 @@ router.get('/subjects/:courseId', async (req, res) => {
 router.get('/teachers/:departmentId', async (req, res) => {
   try {
     const data = await Teacher.find({ departmentId: req.params.departmentId }).populate('subjects');
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/teachers', async (req, res) => {
+  try {
+    const data = await Teacher.find().populate('subjects');
     res.json(data);
   } catch (err) {
     res.status(500).json({ error: err.message });

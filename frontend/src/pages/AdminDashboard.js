@@ -1,13 +1,42 @@
 import React, { useEffect, useRef, useState } from 'react';
 import API from '../services/api';
+import { notifyMasterDataChanged } from '../services/dataSync';
 import auroraLogo from '../assets/image.png';
 import './styles.css';
+
+const dedupeDepartmentsByName = (items = []) => {
+  const seen = new Set();
+  return items.filter((department) => {
+    const key = String(department?.name || '').trim().toLowerCase();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
+
+const getEntityId = (value) => {
+  if (!value) return '';
+  if (typeof value === 'object') return value._id || '';
+  return value;
+};
 
 function AdminDashboard() {
   const [departments, setDepartments] = useState([]);
   const [allCourses, setAllCourses] = useState([]);
   const [adminAcademics, setAdminAcademics] = useState([]);
   const [adminSubjects, setAdminSubjects] = useState([]);
+
+  const [manageDepartmentId, setManageDepartmentId] = useState('');
+  const [manageCourseId, setManageCourseId] = useState('');
+  const [manageAcademicId, setManageAcademicId] = useState('');
+  const [manageSectionId, setManageSectionId] = useState('');
+
+  const [manageCourses, setManageCourses] = useState([]);
+  const [manageAcademics, setManageAcademics] = useState([]);
+  const [manageSections, setManageSections] = useState([]);
+  const [manageSubjects, setManageSubjects] = useState([]);
+  const [manageTeachers, setManageTeachers] = useState([]);
+  const [manageTimetables, setManageTimetables] = useState([]);
 
   const [adminDepartmentName, setAdminDepartmentName] = useState('');
   const [adminCourseName, setAdminCourseName] = useState('');
@@ -31,14 +60,85 @@ function AdminDashboard() {
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef(null);
 
+  const getErrorMessage = (error, fallback) => error.response?.data?.error || fallback;
+
+  const formatDateTime = (value) => {
+    if (!value) return '-';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '-';
+    return date.toLocaleString();
+  };
+
+  const departmentMap = departments.reduce((acc, item) => {
+    acc[item._id] = item.name;
+    return acc;
+  }, {});
+
+  const courseMap = allCourses.reduce((acc, item) => {
+    acc[item._id] = item.name;
+    return acc;
+  }, {});
+
   const loadDepartments = async () => {
     const res = await API.get('/master/departments');
-    setDepartments(res.data);
+    setDepartments(dedupeDepartmentsByName(res.data));
   };
 
   const loadAllCourses = async () => {
     const res = await API.get('/master/courses');
     setAllCourses(res.data);
+  };
+
+  const loadManageCoursesAndTeachers = async (departmentId) => {
+    if (!departmentId) {
+      setManageCourses([]);
+      setManageTeachers([]);
+      return;
+    }
+
+    const [coursesRes, teachersRes] = await Promise.all([
+      API.get(`/master/courses/${departmentId}`),
+      API.get(`/master/teachers/${departmentId}`)
+    ]);
+
+    setManageCourses(coursesRes.data);
+    setManageTeachers(teachersRes.data);
+  };
+
+  const loadManageAcademicsAndSubjects = async (courseId) => {
+    if (!courseId) {
+      setManageAcademics([]);
+      setManageSubjects([]);
+      return;
+    }
+
+    const [academicsRes, subjectsRes] = await Promise.all([
+      API.get(`/master/academic/${courseId}`),
+      API.get(`/master/subjects/${courseId}`)
+    ]);
+
+    setManageAcademics(academicsRes.data);
+    setManageSubjects(subjectsRes.data);
+  };
+
+  const loadManageSections = async (academicId) => {
+    if (!academicId) {
+      setManageSections([]);
+      return;
+    }
+
+    const res = await API.get(`/master/sections/${academicId}`);
+    setManageSections(res.data);
+  };
+
+  const loadManageTimetables = async (sectionId) => {
+    if (!sectionId) {
+      setManageTimetables([]);
+      return;
+    }
+
+    const res = await API.get(`/timetable/section/${sectionId}/all`);
+    setManageTimetables(res.data);
   };
 
   const loadAcademicsForAdmin = async (courseId) => {
@@ -63,15 +163,56 @@ function AdminDashboard() {
     Promise.all([loadDepartments(), loadAllCourses()]).catch((err) => console.error(err));
   }, []);
 
+  useEffect(() => {
+    setManageCourseId('');
+    setManageAcademicId('');
+    setManageSectionId('');
+    setManageAcademics([]);
+    setManageSubjects([]);
+    setManageSections([]);
+    setManageTimetables([]);
+
+    loadManageCoursesAndTeachers(manageDepartmentId).catch((error) => {
+      setAdminStatus({ type: 'error', message: getErrorMessage(error, 'Failed to load program/teacher data.') });
+    });
+  }, [manageDepartmentId]);
+
+  useEffect(() => {
+    setManageAcademicId('');
+    setManageSectionId('');
+    setManageSections([]);
+    setManageTimetables([]);
+
+    loadManageAcademicsAndSubjects(manageCourseId).catch((error) => {
+      setAdminStatus({ type: 'error', message: getErrorMessage(error, 'Failed to load year/term or subject data.') });
+    });
+  }, [manageCourseId]);
+
+  useEffect(() => {
+    setManageSectionId('');
+    setManageTimetables([]);
+
+    loadManageSections(manageAcademicId).catch((error) => {
+      setAdminStatus({ type: 'error', message: getErrorMessage(error, 'Failed to load section data.') });
+    });
+  }, [manageAcademicId]);
+
+  useEffect(() => {
+    loadManageTimetables(manageSectionId).catch((error) => {
+      setAdminStatus({ type: 'error', message: getErrorMessage(error, 'Failed to load generated timetables.') });
+    });
+  }, [manageSectionId]);
+
   const handleCreateDepartment = async () => {
     if (!adminDepartmentName.trim()) return;
     try {
       await API.post('/master/department', { name: adminDepartmentName.trim() });
       setAdminDepartmentName('');
       await loadDepartments();
+      notifyMasterDataChanged();
       setAdminStatus({ type: 'success', message: 'Department created.' });
     } catch (error) {
-      setAdminStatus({ type: 'error', message: error.response?.data?.error || 'Failed to create department.' });
+      setAdminStatus({ type: 'error', message: getErrorMessage(error, 'Failed to create department.') });
     }
   };
 
@@ -84,9 +225,13 @@ function AdminDashboard() {
       });
       setAdminCourseName('');
       await loadAllCourses();
+      if (manageDepartmentId === adminCourseDepartmentId) {
+        await loadManageCoursesAndTeachers(manageDepartmentId);
+      }
+      notifyMasterDataChanged();
       setAdminStatus({ type: 'success', message: 'Program created.' });
     } catch (error) {
-      setAdminStatus({ type: 'error', message: error.response?.data?.error || 'Failed to create program.' });
+      setAdminStatus({ type: 'error', message: getErrorMessage(error, 'Failed to create program.') });
     }
   };
 
@@ -101,9 +246,13 @@ function AdminDashboard() {
       setAdminAcademicYear('');
       setAdminAcademicSemester('');
       await loadAcademicsForAdmin(adminAcademicCourseId);
+      if (manageCourseId === adminAcademicCourseId) {
+        await loadManageAcademicsAndSubjects(manageCourseId);
+      }
+      notifyMasterDataChanged();
       setAdminStatus({ type: 'success', message: 'Year/Term created.' });
     } catch (error) {
-      setAdminStatus({ type: 'error', message: error.response?.data?.error || 'Failed to create year/term.' });
+      setAdminStatus({ type: 'error', message: getErrorMessage(error, 'Failed to create year/term.') });
     }
   };
 
@@ -115,9 +264,13 @@ function AdminDashboard() {
         academicId: adminSectionAcademicId
       });
       setAdminSectionName('');
+      if (manageAcademicId === adminSectionAcademicId) {
+        await loadManageSections(manageAcademicId);
+      }
+      notifyMasterDataChanged();
       setAdminStatus({ type: 'success', message: 'Section created.' });
     } catch (error) {
-      setAdminStatus({ type: 'error', message: error.response?.data?.error || 'Failed to create section.' });
+      setAdminStatus({ type: 'error', message: getErrorMessage(error, 'Failed to create section.') });
     }
   };
 
@@ -130,14 +283,35 @@ function AdminDashboard() {
       });
       setAdminSubjectName('');
       await loadSubjectsForAdmin(adminSubjectCourseId);
+      if (manageCourseId === adminSubjectCourseId) {
+        await loadManageAcademicsAndSubjects(manageCourseId);
+      }
+      notifyMasterDataChanged();
       setAdminStatus({ type: 'success', message: 'Specialization/Subject created.' });
     } catch (error) {
-      setAdminStatus({ type: 'error', message: error.response?.data?.error || 'Failed to create specialization/subject.' });
+      setAdminStatus({ type: 'error', message: getErrorMessage(error, 'Failed to create specialization/subject.') });
     }
   };
 
   const handleCreateTeacher = async () => {
     if (!adminTeacherName.trim() || !adminTeacherDepartmentId) return;
+
+    // Check for duplicate teacher
+    const teacherName = adminTeacherName.trim().toLowerCase();
+    const isDuplicate = manageTeachers.some(
+      (teacher) =>
+        teacher.name.toLowerCase() === teacherName &&
+        teacher.departmentId === adminTeacherDepartmentId
+    );
+
+    if (isDuplicate) {
+      setAdminStatus({
+        type: 'error',
+        message: `Teacher "${adminTeacherName}" already exists in this department.`
+      });
+      return;
+    }
+
     try {
       await API.post('/master/teacher', {
         name: adminTeacherName.trim(),
@@ -146,9 +320,243 @@ function AdminDashboard() {
       });
       setAdminTeacherName('');
       setAdminTeacherSubjectIds([]);
-      setAdminStatus({ type: 'success', message: 'Teacher created.' });
+      if (manageDepartmentId === adminTeacherDepartmentId) {
+        await loadManageCoursesAndTeachers(manageDepartmentId);
+      }
+      notifyMasterDataChanged();
+      setAdminStatus({ type: 'success', message: 'Teacher created successfully.' });
     } catch (error) {
-      setAdminStatus({ type: 'error', message: error.response?.data?.error || 'Failed to create teacher.' });
+      setAdminStatus({ type: 'error', message: getErrorMessage(error, 'Failed to create teacher.') });
+    }
+  };
+
+  const handleEditDepartment = async (department) => {
+    const nextName = window.prompt('Edit department name', department.name || '');
+    if (nextName === null) return;
+
+    if (!nextName.trim()) {
+      setAdminStatus({ type: 'error', message: 'Department name cannot be empty.' });
+      return;
+    }
+
+    try {
+      await API.put(`/master/department/${department._id}`, { name: nextName.trim() });
+      await loadDepartments();
+      setAdminStatus({ type: 'success', message: 'Department updated.' });
+    } catch (error) {
+      setAdminStatus({ type: 'error', message: getErrorMessage(error, 'Failed to update department.') });
+    }
+  };
+
+  const handleDeleteDepartment = async (department) => {
+    const ok = window.confirm(`Delete department "${department.name}"?`);
+    if (!ok) return;
+
+    try {
+      await API.delete(`/master/department/${department._id}`);
+      if (manageDepartmentId === department._id) {
+        setManageDepartmentId('');
+      }
+      await Promise.all([loadDepartments(), loadAllCourses()]);
+      setAdminStatus({ type: 'success', message: 'Department deleted.' });
+    } catch (error) {
+      setAdminStatus({ type: 'error', message: getErrorMessage(error, 'Failed to delete department.') });
+    }
+  };
+
+  const handleEditCourse = async (course) => {
+    const nextName = window.prompt('Edit program name', course.name || '');
+    if (nextName === null) return;
+
+    if (!nextName.trim()) {
+      setAdminStatus({ type: 'error', message: 'Program name cannot be empty.' });
+      return;
+    }
+
+    try {
+      await API.put(`/master/course/${course._id}`, {
+        name: nextName.trim(),
+        departmentId: course.departmentId
+      });
+      await Promise.all([loadAllCourses(), loadManageCoursesAndTeachers(manageDepartmentId)]);
+      setAdminStatus({ type: 'success', message: 'Program updated.' });
+    } catch (error) {
+      setAdminStatus({ type: 'error', message: getErrorMessage(error, 'Failed to update program.') });
+    }
+  };
+
+  const handleDeleteCourse = async (course) => {
+    const ok = window.confirm(`Delete program "${course.name}"?`);
+    if (!ok) return;
+
+    try {
+      await API.delete(`/master/course/${course._id}`);
+      if (manageCourseId === course._id) {
+        setManageCourseId('');
+      }
+      await Promise.all([loadAllCourses(), loadManageCoursesAndTeachers(manageDepartmentId)]);
+      setAdminStatus({ type: 'success', message: 'Program deleted.' });
+    } catch (error) {
+      setAdminStatus({ type: 'error', message: getErrorMessage(error, 'Failed to delete program.') });
+    }
+  };
+
+  const handleEditAcademic = async (academic) => {
+    const nextYear = window.prompt('Edit year', academic.year ?? '');
+    if (nextYear === null) return;
+    const nextSemester = window.prompt('Edit term/semester', academic.semester ?? '');
+    if (nextSemester === null) return;
+
+    if (!nextYear.trim() || !nextSemester.trim()) {
+      setAdminStatus({ type: 'error', message: 'Year and term are required.' });
+      return;
+    }
+
+    try {
+      await API.put(`/master/academic/${academic._id}`, {
+        courseId: academic.courseId,
+        year: Number(nextYear),
+        semester: Number(nextSemester)
+      });
+      await loadManageAcademicsAndSubjects(manageCourseId);
+      setAdminStatus({ type: 'success', message: 'Year/Term updated.' });
+    } catch (error) {
+      setAdminStatus({ type: 'error', message: getErrorMessage(error, 'Failed to update year/term.') });
+    }
+  };
+
+  const handleDeleteAcademic = async (academic) => {
+    const ok = window.confirm(`Delete Year ${academic.year} Term ${academic.semester}?`);
+    if (!ok) return;
+
+    try {
+      await API.delete(`/master/academic/${academic._id}`);
+      if (manageAcademicId === academic._id) {
+        setManageAcademicId('');
+      }
+      await loadManageAcademicsAndSubjects(manageCourseId);
+      setAdminStatus({ type: 'success', message: 'Year/Term deleted.' });
+    } catch (error) {
+      setAdminStatus({ type: 'error', message: getErrorMessage(error, 'Failed to delete year/term.') });
+    }
+  };
+
+  const handleEditSection = async (section) => {
+    const nextName = window.prompt('Edit section name', section.name || '');
+    if (nextName === null) return;
+
+    if (!nextName.trim()) {
+      setAdminStatus({ type: 'error', message: 'Section name cannot be empty.' });
+      return;
+    }
+
+    try {
+      await API.put(`/master/section/${section._id}`, {
+        name: nextName.trim(),
+        academicId: section.academicId
+      });
+      await loadManageSections(manageAcademicId);
+      setAdminStatus({ type: 'success', message: 'Section updated.' });
+    } catch (error) {
+      setAdminStatus({ type: 'error', message: getErrorMessage(error, 'Failed to update section.') });
+    }
+  };
+
+  const handleDeleteSection = async (section) => {
+    const ok = window.confirm(`Delete section "${section.name}"?`);
+    if (!ok) return;
+
+    try {
+      await API.delete(`/master/section/${section._id}`);
+      if (manageSectionId === section._id) {
+        setManageSectionId('');
+      }
+      await loadManageSections(manageAcademicId);
+      setAdminStatus({ type: 'success', message: 'Section deleted.' });
+    } catch (error) {
+      setAdminStatus({ type: 'error', message: getErrorMessage(error, 'Failed to delete section.') });
+    }
+  };
+
+  const handleEditSubject = async (subject) => {
+    const nextName = window.prompt('Edit subject name', subject.name || '');
+    if (nextName === null) return;
+
+    if (!nextName.trim()) {
+      setAdminStatus({ type: 'error', message: 'Subject name cannot be empty.' });
+      return;
+    }
+
+    try {
+      await API.put(`/master/subject/${subject._id}`, {
+        name: nextName.trim(),
+        courseId: subject.courseId
+      });
+      await loadManageAcademicsAndSubjects(manageCourseId);
+      setAdminStatus({ type: 'success', message: 'Subject updated.' });
+    } catch (error) {
+      setAdminStatus({ type: 'error', message: getErrorMessage(error, 'Failed to update subject.') });
+    }
+  };
+
+  const handleDeleteSubject = async (subject) => {
+    const ok = window.confirm(`Delete subject "${subject.name}"?`);
+    if (!ok) return;
+
+    try {
+      await API.delete(`/master/subject/${subject._id}`);
+      await loadManageAcademicsAndSubjects(manageCourseId);
+      setAdminStatus({ type: 'success', message: 'Subject deleted.' });
+    } catch (error) {
+      setAdminStatus({ type: 'error', message: getErrorMessage(error, 'Failed to delete subject.') });
+    }
+  };
+
+  const handleEditTeacher = async (teacher) => {
+    const nextName = window.prompt('Edit teacher name', teacher.name || '');
+    if (nextName === null) return;
+
+    if (!nextName.trim()) {
+      setAdminStatus({ type: 'error', message: 'Teacher name cannot be empty.' });
+      return;
+    }
+
+    try {
+      await API.put(`/master/teacher/${teacher._id}`, {
+        name: nextName.trim(),
+        departmentId: teacher.departmentId,
+        subjects: (teacher.subjects || []).map((subject) => subject._id || subject)
+      });
+      await loadManageCoursesAndTeachers(manageDepartmentId);
+      setAdminStatus({ type: 'success', message: 'Teacher updated.' });
+    } catch (error) {
+      setAdminStatus({ type: 'error', message: getErrorMessage(error, 'Failed to update teacher.') });
+    }
+  };
+
+  const handleDeleteTeacher = async (teacher) => {
+    const ok = window.confirm(`Delete teacher "${teacher.name}"?`);
+    if (!ok) return;
+
+    try {
+      await API.delete(`/master/teacher/${teacher._id}`);
+      await loadManageCoursesAndTeachers(manageDepartmentId);
+      setAdminStatus({ type: 'success', message: 'Teacher deleted.' });
+    } catch (error) {
+      setAdminStatus({ type: 'error', message: getErrorMessage(error, 'Failed to delete teacher.') });
+    }
+  };
+
+  const handleDeleteTimetable = async (timetable) => {
+    const ok = window.confirm('Delete this generated timetable? This action cannot be undone.');
+    if (!ok) return;
+
+    try {
+      await API.delete(`/timetable/${timetable._id}`);
+      await loadManageTimetables(manageSectionId);
+      setAdminStatus({ type: 'success', message: 'Generated timetable deleted.' });
+    } catch (error) {
+      setAdminStatus({ type: 'error', message: getErrorMessage(error, 'Failed to delete generated timetable.') });
     }
   };
 
@@ -177,6 +585,8 @@ function AdminDashboard() {
       setUploadMessage(
         `Imported ${response.data.importedCount} row(s). Skipped ${response.data.skippedCount} row(s).`
       );
+      await Promise.all([loadDepartments(), loadAllCourses()]);
+      notifyMasterDataChanged();
       setUploadFile(null);
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
@@ -433,6 +843,7 @@ function AdminDashboard() {
             </div>
           )}
         </div>
+
       </div>
     </div>
   );

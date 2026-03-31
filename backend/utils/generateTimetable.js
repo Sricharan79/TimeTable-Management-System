@@ -10,6 +10,7 @@ const defaultTimeSlots = [
 ];
 
 const shuffle = (items) => [...items].sort(() => 0.5 - Math.random());
+const normalizeTeacherName = (name) => String(name || '').trim().toLowerCase();
 
 const generateTimetable = (subjects, teachers, options = {}) => {
   const days = options.days || ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
@@ -18,18 +19,43 @@ const generateTimetable = (subjects, teachers, options = {}) => {
   const classesPerSubjectPerWeek = options.classesPerSubjectPerWeek || 6;
   const maxSubjectsPerTeacher = options.maxSubjectsPerTeacher || 4;
   const maxSubjectsPerTeacherPerSection = options.maxSubjectsPerTeacherPerSection || 1;
+  const freeSlotsPerDay = options.freeSlotsPerDay ?? 1;
   const existingTeacherSchedule = options.existingTeacherSchedule || new Set();
+  const existingTeacherScheduleByName = options.existingTeacherScheduleByName || new Set();
 
   const timetable = [];
   const teacherSchedule = new Set(existingTeacherSchedule);
+  const teacherScheduleByName = new Set(existingTeacherScheduleByName);
   const subjectCountsByDay = new Map();
   const subjectCountsByWeek = new Map();
   const teacherSubjectMap = new Map();
   const subjectTeacherAssignment = new Map();
   const teacherAssignedSubjectId = new Map();
+  const daySubjectSlots = new Map();
+
+  const freeSlotIndexesByDay = new Map();
+  for (const day of days) {
+    const allIndexes = timeSlots.map((_, index) => index);
+    const selected = shuffle(allIndexes)
+      .slice(0, Math.max(0, Math.min(freeSlotsPerDay, timeSlots.length)))
+      .sort((a, b) => a - b);
+    freeSlotIndexesByDay.set(day, new Set(selected));
+  }
 
   for (const day of days) {
-    for (const slot of timeSlots) {
+    for (let slotIdx = 0; slotIdx < timeSlots.length; slotIdx++) {
+      const slot = timeSlots[slotIdx];
+      if (freeSlotIndexesByDay.get(day)?.has(slotIdx)) {
+        timetable.push({
+          day,
+          period: slot.period,
+          time: `${slot.start} - ${slot.end}`,
+          subjectId: null,
+          teacherId: null
+        });
+        continue;
+      }
+
       let assigned = false;
 
       const sortedSubjects = shuffle(subjects).sort((a, b) => {
@@ -53,8 +79,15 @@ const generateTimetable = (subjects, teachers, options = {}) => {
         const dayKey = `${day}-${subjectId}`;
         const currentDayCount = subjectCountsByDay.get(dayKey) || 0;
         const currentWeekCount = subjectCountsByWeek.get(subjectId) || 0;
+
         if (currentDayCount >= maxClassesPerSubjectPerDay) continue;
         if (currentWeekCount >= classesPerSubjectPerWeek) continue;
+
+        const daySubjectKey = `${day}-${subjectId}`;
+        const lastSlotForSubject = daySubjectSlots.get(daySubjectKey);
+        if (currentDayCount > 0 && (lastSlotForSubject === undefined || lastSlotForSubject + 1 !== slotIdx)) {
+          continue;
+        }
 
         const assignedTeacherId = subjectTeacherAssignment.get(subjectId);
         const validTeachers = shuffle(
@@ -73,8 +106,11 @@ const generateTimetable = (subjects, teachers, options = {}) => {
           if (assignedSubjectId && assignedSubjectId !== subjectId && maxSubjectsPerTeacherPerSection === 1) {
             continue;
           }
+
           const timeKey = `${teacherId}-${day}-${slot.period}`;
           if (teacherSchedule.has(timeKey)) continue;
+          const teacherNameKey = `${normalizeTeacherName(teacher.name)}-${day}-${slot.period}`;
+          if (normalizeTeacherName(teacher.name) && teacherScheduleByName.has(teacherNameKey)) continue;
 
           const taughtSubjects = teacherSubjectMap.get(teacherId) || new Set();
           if (!taughtSubjects.has(subjectId) && taughtSubjects.size >= maxSubjectsPerTeacherPerSection) {
@@ -93,8 +129,12 @@ const generateTimetable = (subjects, teachers, options = {}) => {
           });
 
           teacherSchedule.add(timeKey);
+          if (normalizeTeacherName(teacher.name)) {
+            teacherScheduleByName.add(teacherNameKey);
+          }
           subjectCountsByDay.set(dayKey, currentDayCount + 1);
           subjectCountsByWeek.set(subjectId, currentWeekCount + 1);
+          daySubjectSlots.set(daySubjectKey, slotIdx);
           taughtSubjects.add(subjectId);
           teacherSubjectMap.set(teacherId, taughtSubjects);
           subjectTeacherAssignment.set(subjectId, teacherId);
