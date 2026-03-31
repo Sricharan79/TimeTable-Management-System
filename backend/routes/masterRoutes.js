@@ -676,21 +676,46 @@ router.put('/teacher/:id', async (req, res) => {
 
 router.delete('/department/:id', async (req, res) => {
   try {
-    const hasCourses = await Course.exists({ departmentId: req.params.id });
-    const hasTeachers = await Teacher.exists({ departmentId: req.params.id });
-
-    if (hasCourses || hasTeachers) {
-      return res.status(400).json({
-        error: 'Cannot delete department with linked programs/teachers. Delete linked records first.'
-      });
-    }
-
-    const data = await Department.findByIdAndDelete(req.params.id);
-    if (!data) {
+    const department = await Department.findById(req.params.id);
+    if (!department) {
       return res.status(404).json({ error: 'Department not found' });
     }
 
-    return res.json({ message: 'Department deleted successfully' });
+    const courses = await Course.find({ departmentId: req.params.id }, { _id: 1 });
+    const courseIds = courses.map((item) => item._id);
+
+    const academics = await Academic.find({ courseId: { $in: courseIds } }, { _id: 1 });
+    const academicIds = academics.map((item) => item._id);
+
+    const sections = await Section.find({ academicId: { $in: academicIds } }, { _id: 1 });
+    const sectionIds = sections.map((item) => item._id);
+
+    const subjects = await Subject.find({ courseId: { $in: courseIds } }, { _id: 1 });
+    const subjectIds = subjects.map((item) => item._id);
+
+    if (subjectIds.length) {
+      await Teacher.updateMany(
+        { subjects: { $in: subjectIds } },
+        { $pull: { subjects: { $in: subjectIds } } }
+      );
+      await Timetable.updateMany(
+        { 'entries.subjectId': { $in: subjectIds } },
+        { $pull: { entries: { subjectId: { $in: subjectIds } } } }
+      );
+    }
+
+    if (sectionIds.length) {
+      await Timetable.deleteMany({ sectionId: { $in: sectionIds } });
+    }
+
+    await Teacher.deleteMany({ departmentId: req.params.id });
+    await Subject.deleteMany({ courseId: { $in: courseIds } });
+    await Section.deleteMany({ academicId: { $in: academicIds } });
+    await Academic.deleteMany({ courseId: { $in: courseIds } });
+    await Course.deleteMany({ departmentId: req.params.id });
+    await Department.findByIdAndDelete(req.params.id);
+
+    return res.json({ message: 'Department and all linked records deleted successfully' });
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }
@@ -698,21 +723,41 @@ router.delete('/department/:id', async (req, res) => {
 
 router.delete('/course/:id', async (req, res) => {
   try {
-    const hasAcademics = await Academic.exists({ courseId: req.params.id });
-    const hasSubjects = await Subject.exists({ courseId: req.params.id });
-
-    if (hasAcademics || hasSubjects) {
-      return res.status(400).json({
-        error: 'Cannot delete program with linked year/terms or subjects. Delete linked records first.'
-      });
-    }
-
-    const data = await Course.findByIdAndDelete(req.params.id);
-    if (!data) {
+    const course = await Course.findById(req.params.id);
+    if (!course) {
       return res.status(404).json({ error: 'Program not found' });
     }
 
-    return res.json({ message: 'Program deleted successfully' });
+    const academics = await Academic.find({ courseId: req.params.id }, { _id: 1 });
+    const academicIds = academics.map((item) => item._id);
+
+    const sections = await Section.find({ academicId: { $in: academicIds } }, { _id: 1 });
+    const sectionIds = sections.map((item) => item._id);
+
+    const subjects = await Subject.find({ courseId: req.params.id }, { _id: 1 });
+    const subjectIds = subjects.map((item) => item._id);
+
+    if (subjectIds.length) {
+      await Teacher.updateMany(
+        { subjects: { $in: subjectIds } },
+        { $pull: { subjects: { $in: subjectIds } } }
+      );
+      await Timetable.updateMany(
+        { 'entries.subjectId': { $in: subjectIds } },
+        { $pull: { entries: { subjectId: { $in: subjectIds } } } }
+      );
+    }
+
+    if (sectionIds.length) {
+      await Timetable.deleteMany({ sectionId: { $in: sectionIds } });
+    }
+
+    await Subject.deleteMany({ courseId: req.params.id });
+    await Section.deleteMany({ academicId: { $in: academicIds } });
+    await Academic.deleteMany({ courseId: req.params.id });
+    await Course.findByIdAndDelete(req.params.id);
+
+    return res.json({ message: 'Program and all linked records deleted successfully' });
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }
@@ -720,20 +765,22 @@ router.delete('/course/:id', async (req, res) => {
 
 router.delete('/academic/:id', async (req, res) => {
   try {
-    const hasSections = await Section.exists({ academicId: req.params.id });
-
-    if (hasSections) {
-      return res.status(400).json({
-        error: 'Cannot delete year/term with linked sections. Delete linked sections first.'
-      });
-    }
-
-    const data = await Academic.findByIdAndDelete(req.params.id);
-    if (!data) {
+    const academic = await Academic.findById(req.params.id);
+    if (!academic) {
       return res.status(404).json({ error: 'Year/Term not found' });
     }
 
-    return res.json({ message: 'Year/Term deleted successfully' });
+    const sections = await Section.find({ academicId: req.params.id }, { _id: 1 });
+    const sectionIds = sections.map((item) => item._id);
+
+    if (sectionIds.length) {
+      await Timetable.deleteMany({ sectionId: { $in: sectionIds } });
+      await Section.deleteMany({ academicId: req.params.id });
+    }
+
+    await Academic.findByIdAndDelete(req.params.id);
+
+    return res.json({ message: 'Year/Term and linked sections deleted successfully' });
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }
@@ -741,19 +788,15 @@ router.delete('/academic/:id', async (req, res) => {
 
 router.delete('/section/:id', async (req, res) => {
   try {
-    const hasTimetables = await Timetable.exists({ sectionId: req.params.id });
-    if (hasTimetables) {
-      return res.status(400).json({
-        error: 'Cannot delete section with generated timetables. Delete timetable entries first.'
-      });
-    }
-
-    const data = await Section.findByIdAndDelete(req.params.id);
-    if (!data) {
+    const section = await Section.findById(req.params.id);
+    if (!section) {
       return res.status(404).json({ error: 'Section not found' });
     }
 
-    return res.json({ message: 'Section deleted successfully' });
+    await Timetable.deleteMany({ sectionId: req.params.id });
+    await Section.findByIdAndDelete(req.params.id);
+
+    return res.json({ message: 'Section and linked timetables deleted successfully' });
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }
@@ -761,21 +804,24 @@ router.delete('/section/:id', async (req, res) => {
 
 router.delete('/subject/:id', async (req, res) => {
   try {
-    const linkedTeacher = await Teacher.exists({ subjects: req.params.id });
-    const linkedTimetable = await Timetable.exists({ 'entries.subjectId': req.params.id });
-
-    if (linkedTeacher || linkedTimetable) {
-      return res.status(400).json({
-        error: 'Cannot delete subject linked to teachers or generated timetables.'
-      });
-    }
-
-    const data = await Subject.findByIdAndDelete(req.params.id);
-    if (!data) {
+    const subject = await Subject.findById(req.params.id);
+    if (!subject) {
       return res.status(404).json({ error: 'Subject not found' });
     }
 
-    return res.json({ message: 'Subject deleted successfully' });
+    await Teacher.updateMany(
+      { subjects: req.params.id },
+      { $pull: { subjects: req.params.id } }
+    );
+
+    await Timetable.updateMany(
+      { 'entries.subjectId': req.params.id },
+      { $pull: { entries: { subjectId: req.params.id } } }
+    );
+
+    await Subject.findByIdAndDelete(req.params.id);
+
+    return res.json({ message: 'Subject and linked references deleted successfully' });
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }
@@ -783,20 +829,19 @@ router.delete('/subject/:id', async (req, res) => {
 
 router.delete('/teacher/:id', async (req, res) => {
   try {
-    const linkedTimetable = await Timetable.exists({ 'entries.teacherId': req.params.id });
-
-    if (linkedTimetable) {
-      return res.status(400).json({
-        error: 'Cannot delete teacher linked to generated timetables.'
-      });
-    }
-
-    const data = await Teacher.findByIdAndDelete(req.params.id);
-    if (!data) {
+    const teacher = await Teacher.findById(req.params.id);
+    if (!teacher) {
       return res.status(404).json({ error: 'Teacher not found' });
     }
 
-    return res.json({ message: 'Teacher deleted successfully' });
+    await Timetable.updateMany(
+      { 'entries.teacherId': req.params.id },
+      { $pull: { entries: { teacherId: req.params.id } } }
+    );
+
+    await Teacher.findByIdAndDelete(req.params.id);
+
+    return res.json({ message: 'Teacher and linked timetable references deleted successfully' });
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }

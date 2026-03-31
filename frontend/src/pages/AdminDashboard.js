@@ -295,6 +295,23 @@ function AdminDashboard() {
 
   const handleCreateTeacher = async () => {
     if (!adminTeacherName.trim() || !adminTeacherDepartmentId) return;
+
+    // Check for duplicate teacher
+    const teacherName = adminTeacherName.trim().toLowerCase();
+    const isDuplicate = manageTeachers.some(
+      (teacher) =>
+        teacher.name.toLowerCase() === teacherName &&
+        teacher.departmentId === adminTeacherDepartmentId
+    );
+
+    if (isDuplicate) {
+      setAdminStatus({
+        type: 'error',
+        message: `Teacher "${adminTeacherName}" already exists in this department.`
+      });
+      return;
+    }
+
     try {
       await API.post('/master/teacher', {
         name: adminTeacherName.trim(),
@@ -307,7 +324,7 @@ function AdminDashboard() {
         await loadManageCoursesAndTeachers(manageDepartmentId);
       }
       notifyMasterDataChanged();
-      setAdminStatus({ type: 'success', message: 'Teacher created.' });
+      setAdminStatus({ type: 'success', message: 'Teacher created successfully.' });
     } catch (error) {
       setAdminStatus({ type: 'error', message: getErrorMessage(error, 'Failed to create teacher.') });
     }
