@@ -209,6 +209,129 @@ body {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
 }
 
+.fixed-slots-panel {
+  width: 100%;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  background: #f8fbff;
+  padding: 12px 14px;
+  text-align: left;
+}
+
+.fixed-slots-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.fixed-slots-header h3 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #222222;
+}
+
+.fixed-slots-header p {
+  margin: 4px 0 0;
+  font-size: 0.85rem;
+  color: #666666;
+}
+
+.fixed-slot-count {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #2c7be5;
+  background: #e8f1ff;
+  padding: 6px 10px;
+  border-radius: 999px;
+}
+
+.fixed-slots-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.fixed-slot-message {
+  margin-bottom: 10px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #2c7be5;
+}
+
+.fixed-clear-btn {
+  background: #f26552;
+  border-color: #f26552;
+  box-shadow: 0 2px 8px rgba(242, 101, 82, 0.3);
+}
+
+.fixed-clear-btn:hover {
+  background: #e15745;
+}
+
+.fixed-slots-grid {
+  display: grid;
+  gap: 6px;
+  overflow-x: auto;
+}
+
+.fixed-slot-row {
+  display: grid;
+  grid-template-columns: 70px repeat(8, minmax(40px, 1fr));
+  gap: 6px;
+  align-items: center;
+}
+
+.fixed-slot-header {
+  font-weight: 600;
+  color: #333333;
+}
+
+.fixed-slot-day {
+  font-size: 0.85rem;
+  color: #444444;
+}
+
+.fixed-slot-period {
+  font-size: 0.75rem;
+  text-align: center;
+  color: #666666;
+}
+
+.fixed-slot-cell {
+  height: 32px;
+  border: 1px solid #d4d9e2;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #ffffff;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.fixed-slot-cell input {
+  width: 16px;
+  height: 16px;
+  accent-color: #2c7be5;
+}
+
+.fixed-slot-cell.selected {
+  background: #e8f1ff;
+  border-color: #2c7be5;
+  box-shadow: 0 0 0 2px rgba(44, 123, 229, 0.15);
+}
+
+.fixed-slot-cell.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background: #f2f4f7;
+}
+
 select {
   appearance: none;
   -webkit-appearance: none;

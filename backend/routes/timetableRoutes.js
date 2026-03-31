@@ -103,6 +103,8 @@ router.post('/generate', async (req, res) => {
       { period: 7, start: '15:00', end: '15:50' },
       { period: 8, start: '15:50', end: '16:40' }
     ];
+    const allowedPeriods = new Set(teachingSlots.map((slot) => slot.period));
+    const allowedDays = new Set(['Mon', 'Tue', 'Wed', 'Thu', 'Fri']);
 
     const displaySlots = [
       { period: 1, label: 'P1', start: '09:30', end: '10:20' },
@@ -118,6 +120,19 @@ router.post('/generate', async (req, res) => {
 
     const generatedTimetables = [];
     for (const section of targetSections) {
+      const sectionFixedSlots = Array.isArray(section.fixedSlots) ? section.fixedSlots : [];
+      const sanitizedFixedSlots = sectionFixedSlots
+        .map((slot) => ({
+          day: String(slot?.day || '').trim(),
+          period: Number(slot?.period),
+          label: String(slot?.label || '').trim()
+        }))
+        .filter((slot) => allowedDays.has(slot.day) && allowedPeriods.has(slot.period))
+        .map((slot) => ({
+          ...slot,
+          label: slot.label || 'Fixed Slot'
+        }));
+
       const { entries, remainingBySubject } = generateTimetable(subjects, teachers, {
         timeSlots: teachingSlots,
         maxClassesPerSubjectPerDay: 2,
@@ -126,7 +141,8 @@ router.post('/generate', async (req, res) => {
         maxSubjectsPerTeacherPerSection: 1,
         freeSlotsPerDay: 1,
         existingTeacherSchedule,
-        existingTeacherScheduleByName
+        existingTeacherScheduleByName,
+        fixedSlots: sanitizedFixedSlots
       });
 
       const timetable = await Timetable.findOneAndUpdate(
@@ -207,6 +223,9 @@ router.get('/download/:id', async (req, res) => {
             }
 
             const entry = entryMap.get(`${day}-${slot.period}`);
+            if (entry?.isFixed) {
+              return `<td>${escapeHtml(entry.fixedLabel || 'Fixed Slot')}</td>`;
+            }
             const subjectName = entry?.subjectId?.name || 'Free Slot';
             return `<td>${escapeHtml(subjectName)}</td>`;
           })

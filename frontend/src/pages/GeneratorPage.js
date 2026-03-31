@@ -9,6 +9,7 @@ function GeneratorPage({ embedded = false }) {
   const [departments, setDepartments] = useState([]);
   const [courses, setCourses] = useState([]);
   const [academics, setAcademics] = useState([]);
+  const [sections, setSections] = useState([]);
 
   const [subjects, setSubjects] = useState([]);
   const [teachers, setTeachers] = useState([]);
@@ -23,6 +24,12 @@ function GeneratorPage({ embedded = false }) {
   const [displaySlots, setDisplaySlots] = useState([]);
   const [downloadingId, setDownloadingId] = useState('');
   const [downloadError, setDownloadError] = useState('');
+  const [showFixedSlots, setShowFixedSlots] = useState(false);
+  const [fixedSlotLabel, setFixedSlotLabel] = useState('Extra Activity');
+  const [fixedSlotMap, setFixedSlotMap] = useState({});
+  const [maxFixedSlots, setMaxFixedSlots] = useState(0);
+  const [selectedFixedSectionId, setSelectedFixedSectionId] = useState('');
+  const [fixedSlotMessage, setFixedSlotMessage] = useState('');
   const selectedRef = useRef(selected);
 
   useEffect(() => {
@@ -34,6 +41,21 @@ function GeneratorPage({ embedded = false }) {
     const res = await API.get('/master/departments');
     setDepartments(res.data);
     return res.data;
+  };
+
+  const loadSectionsByAcademicId = async (academicId) => {
+    if (!academicId) {
+      setSections([]);
+      setSelectedFixedSectionId('');
+      setFixedSlotMap({});
+      setMaxFixedSlots(0);
+      return [];
+    }
+
+    const res = await API.get(`/master/sections/${academicId}`);
+    const list = res.data || [];
+    setSections(list);
+    return list;
   };
 
   const syncHierarchyFromSelection = useCallback(async () => {
@@ -89,11 +111,27 @@ function GeneratorPage({ embedded = false }) {
     setSubjects(subjectsRes.data);
 
     if (!current.academicId) {
+      setSections([]);
+      setSelectedFixedSectionId('');
+      setFixedSlotMap({});
+      setMaxFixedSlots(0);
       return;
     }
     const selectedAcademicExists = latestAcademics.some((item) => item._id === current.academicId);
     if (!selectedAcademicExists) {
       setSelected((prev) => ({ ...prev, academicId: '' }));
+      setSections([]);
+      setSelectedFixedSectionId('');
+      setFixedSlotMap({});
+      setMaxFixedSlots(0);
+      return;
+    }
+
+    const latestSections = await loadSectionsByAcademicId(current.academicId);
+    if (latestSections.length) {
+      setSelectedFixedSectionId((prev) =>
+        prev && latestSections.some((item) => item._id === prev) ? prev : latestSections[0]._id
+      );
     }
   }, []);
 
@@ -146,6 +184,10 @@ function GeneratorPage({ embedded = false }) {
     const resTeachers = await API.get(`/master/teachers/${departmentId}`);
     setTeachers(resTeachers.data);
     setAcademics([]);
+    setSections([]);
+    setSelectedFixedSectionId('');
+    setFixedSlotMap({});
+    setMaxFixedSlots(0);
   };
 
   // ================= COURSE CHANGE =================
@@ -163,6 +205,10 @@ function GeneratorPage({ embedded = false }) {
 
     const res2 = await API.get(`/master/subjects/${courseId}`);
     setSubjects(res2.data);
+    setSections([]);
+    setSelectedFixedSectionId('');
+    setFixedSlotMap({});
+    setMaxFixedSlots(0);
   };
 
   // ================= ACADEMIC CHANGE =================
@@ -173,6 +219,19 @@ function GeneratorPage({ embedded = false }) {
       ...prev,
       academicId
     }));
+
+    setSections([]);
+    setSelectedFixedSectionId('');
+    setFixedSlotMap({});
+    setMaxFixedSlots(0);
+    setFixedSlotMessage('');
+
+    if (academicId) {
+      const latestSections = await loadSectionsByAcademicId(academicId);
+      if (latestSections.length) {
+        setSelectedFixedSectionId(latestSections[0]._id);
+      }
+    }
   };
 
   // ================= GENERATE TIMETABLE =================
@@ -194,7 +253,9 @@ function GeneratorPage({ embedded = false }) {
         if (!formatted[entry.day]) formatted[entry.day] = {};
         formatted[entry.day][entry.period] = {
           subjectId: entry.subjectId,
-          teacherId: entry.teacherId
+          teacherId: entry.teacherId,
+          isFixed: entry.isFixed,
+          fixedLabel: entry.fixedLabel
         };
       });
 
@@ -264,10 +325,124 @@ function GeneratorPage({ embedded = false }) {
     { period: 8, label: 'P8', start: '15:50', end: '16:40' }
   ];
   const slotColumns = displaySlots.length ? displaySlots : fallbackSlots;
+  const teachingSlots = slotColumns.filter((slot) => !slot.isBreak);
   const canGenerate =
     selected.departmentId &&
     selected.courseId &&
     selected.academicId;
+  const fixedSlotCount = Object.keys(fixedSlotMap).filter((key) => fixedSlotMap[key]).length;
+
+  const selectedFixedSection = sections.find((section) => section._id === selectedFixedSectionId);
+
+  useEffect(() => {
+    if (!selectedFixedSection) {
+      if (sections.length && !selectedFixedSectionId) {
+        setSelectedFixedSectionId(sections[0]._id);
+      }
+      if (!sections.length) {
+        setFixedSlotMap({});
+        setMaxFixedSlots(0);
+      }
+      return;
+    }
+
+    const map = {};
+    const savedSlots = Array.isArray(selectedFixedSection.fixedSlots)
+      ? selectedFixedSection.fixedSlots
+      : [];
+    savedSlots.forEach((slot) => {
+      if (!slot?.day || !slot?.period) return;
+      map[`${slot.day}-${slot.period}`] = true;
+    });
+    setFixedSlotMap(map);
+    setMaxFixedSlots(savedSlots.length);
+    setFixedSlotLabel(savedSlots[0]?.label || 'Extra Activity');
+  }, [selectedFixedSectionId, sections]);
+
+  const handleFixedSectionChange = (event) => {
+    setSelectedFixedSectionId(event.target.value);
+    setFixedSlotMessage('');
+  };
+
+  const toggleFixedSlot = (day, period) => {
+    if (!selectedFixedSectionId) return;
+    const key = `${day}-${period}`;
+    setFixedSlotMap((prev) => {
+      const currentCount = Object.keys(prev).length;
+      if (!prev[key] && maxFixedSlots > 0 && currentCount >= maxFixedSlots) {
+        return prev;
+      }
+      const next = { ...prev };
+      if (next[key]) {
+        delete next[key];
+      } else {
+        next[key] = true;
+      }
+      return next;
+    });
+  };
+
+  const clearFixedSlots = () => {
+    setFixedSlotMap({});
+  };
+
+  const handleMaxFixedSlotsChange = (event) => {
+    const value = Number(event.target.value);
+    const nextValue = Number.isNaN(value) ? 0 : Math.max(0, Math.floor(value));
+    setMaxFixedSlots(nextValue);
+    if (nextValue === 0) {
+      setFixedSlotMap({});
+      return;
+    }
+
+    if (nextValue < fixedSlotCount) {
+      const orderedKeys = days.flatMap((day) =>
+        teachingSlots.map((slot) => `${day}-${slot.period}`)
+      );
+      const trimmed = {};
+      let kept = 0;
+      for (const key of orderedKeys) {
+        if (!fixedSlotMap[key]) continue;
+        trimmed[key] = true;
+        kept += 1;
+        if (kept >= nextValue) break;
+      }
+      setFixedSlotMap(trimmed);
+    }
+  };
+
+  const handleSaveFixedSlots = async () => {
+    if (!selectedFixedSectionId) return;
+    const trimmedLabel = fixedSlotLabel.trim() || 'Fixed Slot';
+    const fixedSlots = Object.keys(fixedSlotMap)
+      .filter((key) => fixedSlotMap[key])
+      .map((key) => {
+        const [day, period] = key.split('-');
+        return {
+          day,
+          period: Number(period),
+          label: trimmedLabel
+        };
+      });
+
+    try {
+      setFixedSlotMessage('');
+      const res = await API.put(`/master/section/${selectedFixedSectionId}/fixed-slots`, {
+        fixedSlots
+      });
+      const updated = res.data;
+      setSections((prev) =>
+        prev.map((section) =>
+          section._id === selectedFixedSectionId
+            ? { ...section, fixedSlots: updated.fixedSlots || fixedSlots }
+            : section
+        )
+      );
+      setFixedSlotMessage('Fixed slots saved.');
+    } catch (error) {
+      setFixedSlotMessage(error.response?.data?.error || 'Failed to save fixed slots.');
+    }
+  };
 
   const selectedDepartment = departments.find((dep) => dep._id === selected.departmentId);
   const selectedCourse = courses.find((course) => course._id === selected.courseId);
@@ -318,8 +493,105 @@ function GeneratorPage({ embedded = false }) {
             ))}
           </select>
 
+          <button
+            type="button"
+            className="generate-btn"
+            onClick={() => setShowFixedSlots((prev) => !prev)}
+          >
+            {showFixedSlots ? 'Hide Fixed Slots' : `Configure Fixed Slots (${fixedSlotCount})`}
+          </button>
+
+          {showFixedSlots && (
+            <div className="fixed-slots-panel">
+              <div className="fixed-slots-header">
+                <div>
+                  <h3>Fixed Slots by Section</h3>
+                  <p>Pick a section and reserve its extra-activity periods.</p>
+                </div>
+                <span className="fixed-slot-count">{fixedSlotCount} / {maxFixedSlots || 0}</span>
+              </div>
+
+              <div className="fixed-slots-controls">
+                <select value={selectedFixedSectionId} onChange={handleFixedSectionChange}>
+                  <option value="">Select Section</option>
+                  {sections.map((section) => (
+                    <option key={section._id} value={section._id}>{section.name}</option>
+                  ))}
+                </select>
+                <input
+                  type="number"
+                  min={0}
+                  value={maxFixedSlots}
+                  onChange={handleMaxFixedSlotsChange}
+                  placeholder="Number of fixed slots"
+                />
+                <input
+                  type="text"
+                  value={fixedSlotLabel}
+                  onChange={(e) => setFixedSlotLabel(e.target.value)}
+                  placeholder="Label (e.g., Extra Activity)"
+                />
+                <button
+                  type="button"
+                  className="generate-btn fixed-clear-btn"
+                  onClick={clearFixedSlots}
+                  disabled={!fixedSlotCount}
+                >
+                  Clear Fixed Slots
+                </button>
+                <button
+                  type="button"
+                  className="generate-btn"
+                  onClick={handleSaveFixedSlots}
+                  disabled={!selectedFixedSectionId}
+                >
+                  Save Fixed Slots
+                </button>
+              </div>
+
+              {fixedSlotMessage && (
+                <div className="fixed-slot-message">{fixedSlotMessage}</div>
+              )}
+
+              <div className="fixed-slots-grid">
+                <div className="fixed-slot-row fixed-slot-header">
+                  <span className="fixed-slot-day">Day</span>
+                  {teachingSlots.map((slot) => (
+                    <span key={slot.period} className="fixed-slot-period">
+                      {slot.label || `P${slot.period}`}
+                    </span>
+                  ))}
+                </div>
+                {days.map((day) => (
+                  <div key={day} className="fixed-slot-row">
+                    <span className="fixed-slot-day">{day}</span>
+                    {teachingSlots.map((slot) => {
+                      const key = `${day}-${slot.period}`;
+                      const checked = Boolean(fixedSlotMap[key]);
+                      const limitReached = maxFixedSlots > 0 && fixedSlotCount >= maxFixedSlots && !checked;
+                      const disabled = !selectedFixedSectionId || limitReached;
+                      return (
+                        <label
+                          key={key}
+                          className={`fixed-slot-cell ${checked ? 'selected' : ''} ${disabled ? 'disabled' : ''}`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => toggleFixedSlot(day, slot.period)}
+                            disabled={disabled}
+                          />
+                        </label>
+                      );
+                    })}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           <button className="generate-btn" onClick={handleGenerate} disabled={!canGenerate}>
-           Generate Timetable
+            Generate Timetable
           </button>
 
           <button
@@ -418,8 +690,10 @@ function GeneratorPage({ embedded = false }) {
                         {slotColumns.map((slot, slotIndex) => (
                           <td key={`${day}-${slot.label || slot.period || slotIndex}`}>
                             {slot.isBreak
-                              ? 'Lunch'
-                              : (subjectMap[formatted[day]?.[slot.period]?.subjectId] || 'Free Slot')}
+                                  ? 'Lunch'
+                                  : (formatted[day]?.[slot.period]?.isFixed
+                                    ? (formatted[day]?.[slot.period]?.fixedLabel || 'Fixed Slot')
+                                    : (subjectMap[formatted[day]?.[slot.period]?.subjectId] || 'Free Slot'))}
                           </td>
                         ))}
                       </tr>

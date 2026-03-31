@@ -23,6 +23,17 @@ const generateTimetable = (subjects, teachers, options = {}) => {
   const existingTeacherScheduleByName = options.existingTeacherScheduleByName || new Set();
   const maxAttempts = Math.max(1, Number(options.maxAttempts) || 60);
   const allowNonConsecutive = Boolean(options.allowNonConsecutive);
+  const fixedSlots = Array.isArray(options.fixedSlots) ? options.fixedSlots : [];
+  const fixedSlotMap = new Map();
+  fixedSlots.forEach((slot) => {
+    const day = String(slot?.day || '').trim();
+    const period = Number(slot?.period);
+    if (!day || Number.isNaN(period)) return;
+    const label = String(slot?.label || '').trim();
+    fixedSlotMap.set(`${day}-${period}`, {
+      label: label || 'Fixed Slot'
+    });
+  });
 
   const buildTimetable = () => {
     const timetable = [];
@@ -39,6 +50,19 @@ const generateTimetable = (subjects, teachers, options = {}) => {
     for (const day of days) {
       for (let slotIdx = 0; slotIdx < timeSlots.length; slotIdx++) {
         const slot = timeSlots[slotIdx];
+        const fixedSlot = fixedSlotMap.get(`${day}-${slot.period}`);
+        if (fixedSlot) {
+          timetable.push({
+            day,
+            period: slot.period,
+            time: `${slot.start} - ${slot.end}`,
+            subjectId: null,
+            teacherId: null,
+            isFixed: true,
+            fixedLabel: fixedSlot.label
+          });
+          continue;
+        }
         let assigned = false;
 
         const sortedSubjects = shuffle(subjects).sort((a, b) => {
