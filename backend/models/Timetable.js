@@ -9,7 +9,9 @@ const TimetableSchema = new mongoose.Schema(
         period: Number,
         time: String,
         subjectId: { type: mongoose.Schema.Types.ObjectId, ref: 'Subject' },
-        teacherId: { type: mongoose.Schema.Types.ObjectId, ref: 'Teacher' }
+        teacherId: { type: mongoose.Schema.Types.ObjectId, ref: 'Teacher' },
+        isFixed: { type: Boolean, default: false },
+        fixedLabel: { type: String, default: '' }
       }
     ]
   },

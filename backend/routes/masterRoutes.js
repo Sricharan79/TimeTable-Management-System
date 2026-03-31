@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const mongoose = require('mongoose');
 const multer = require('multer');
 const xlsx = require('xlsx');
 const mammoth = require('mammoth');
@@ -15,6 +16,7 @@ const Timetable = require('../models/Timetable');
 const upload = multer({ storage: multer.memoryStorage() });
 
 const normalizeText = (value) => String(value ?? '').trim();
+const isValidId = (value) => mongoose.Types.ObjectId.isValid(String(value || ''));
 
 const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -606,6 +608,45 @@ router.put('/section/:id', async (req, res) => {
       new: true,
       runValidators: true
     });
+
+    if (!data) {
+      return res.status(404).json({ error: 'Section not found' });
+    }
+
+    return res.json(data);
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+router.put('/section/:id/fixed-slots', async (req, res) => {
+  try {
+    const sectionId = req.params.id;
+    if (!isValidId(sectionId)) {
+      return res.status(400).json({ error: 'Invalid sectionId' });
+    }
+
+    const allowedDays = new Set(['Mon', 'Tue', 'Wed', 'Thu', 'Fri']);
+    const allowedPeriods = new Set([1, 2, 3, 4, 5, 6, 7, 8]);
+    const rawSlots = Array.isArray(req.body?.fixedSlots) ? req.body.fixedSlots : [];
+
+    const sanitizedSlots = rawSlots
+      .map((slot) => ({
+        day: String(slot?.day || '').trim(),
+        period: Number(slot?.period),
+        label: String(slot?.label || '').trim()
+      }))
+      .filter((slot) => allowedDays.has(slot.day) && allowedPeriods.has(slot.period))
+      .map((slot) => ({
+        ...slot,
+        label: slot.label || 'Fixed Slot'
+      }));
+
+    const data = await Section.findByIdAndUpdate(
+      sectionId,
+      { fixedSlots: sanitizedSlots },
+      { new: true, runValidators: true }
+    );
 
     if (!data) {
       return res.status(404).json({ error: 'Section not found' });
