@@ -34,6 +34,7 @@ const generateTimetable = (subjects, teachers, options = {}) => {
     const subjectTeacherAssignment = new Map();
     const teacherAssignedSubjectId = new Map();
     const daySubjectSlots = new Map();
+    const firstPeriodSubjects = new Set();
 
     for (const day of days) {
       for (let slotIdx = 0; slotIdx < timeSlots.length; slotIdx++) {
@@ -56,79 +57,98 @@ const generateTimetable = (subjects, teachers, options = {}) => {
           return aDayCount - bDayCount;
         });
 
-        for (const subject of sortedSubjects) {
-          const subjectId = subject._id.toString();
-          const dayKey = `${day}-${subjectId}`;
-          const currentDayCount = subjectCountsByDay.get(dayKey) || 0;
-          const currentWeekCount = subjectCountsByWeek.get(subjectId) || 0;
+        const isFirstPeriod = slotIdx === 0;
+        const prioritizedSubjects = isFirstPeriod
+          ? sortedSubjects.filter((subject) => !firstPeriodSubjects.has(subject._id.toString()))
+          : sortedSubjects;
 
-          if (currentDayCount >= maxClassesPerSubjectPerDay) continue;
-          if (currentWeekCount >= classesPerSubjectPerWeek) continue;
+        const tryAssign = (allowNonConsecutiveSlots, subjectPool) => {
+          for (const subject of subjectPool) {
+            const subjectId = subject._id.toString();
+            const dayKey = `${day}-${subjectId}`;
+            const currentDayCount = subjectCountsByDay.get(dayKey) || 0;
+            const currentWeekCount = subjectCountsByWeek.get(subjectId) || 0;
 
-          const daySubjectKey = `${day}-${subjectId}`;
-          const lastSlotForSubject = daySubjectSlots.get(daySubjectKey);
-          if (!allowNonConsecutive && currentDayCount > 0 && (lastSlotForSubject === undefined || lastSlotForSubject + 1 !== slotIdx)) {
-            continue;
-          }
+            if (currentDayCount >= maxClassesPerSubjectPerDay) continue;
+            if (currentWeekCount >= classesPerSubjectPerWeek) continue;
 
-          const assignedTeacherId = subjectTeacherAssignment.get(subjectId);
-          const validTeachers = shuffle(
-            teachers.filter((teacher) =>
-              teacher.subjects.some((sub) => sub.toString() === subjectId)
-            )
-          ).filter((teacher) => {
-            const teacherId = teacher._id.toString();
-            if (assignedTeacherId && teacherId !== assignedTeacherId) return false;
-            return true;
-          });
-
-          for (const teacher of validTeachers) {
-            const teacherId = teacher._id.toString();
-            const assignedSubjectId = teacherAssignedSubjectId.get(teacherId);
-            if (assignedSubjectId && assignedSubjectId !== subjectId && maxSubjectsPerTeacherPerSection === 1) {
+            const daySubjectKey = `${day}-${subjectId}`;
+            const lastSlotForSubject = daySubjectSlots.get(daySubjectKey);
+            if (!allowNonConsecutiveSlots && currentDayCount > 0 && (lastSlotForSubject === undefined || lastSlotForSubject + 1 !== slotIdx)) {
               continue;
             }
 
-            const timeKey = `${teacherId}-${day}-${slot.period}`;
-            if (teacherSchedule.has(timeKey)) continue;
-            const teacherNameKey = `${normalizeTeacherName(teacher.name)}-${day}-${slot.period}`;
-            if (normalizeTeacherName(teacher.name) && teacherScheduleByName.has(teacherNameKey)) continue;
-
-            const taughtSubjects = teacherSubjectMap.get(teacherId) || new Set();
-            if (!taughtSubjects.has(subjectId) && taughtSubjects.size >= maxSubjectsPerTeacherPerSection) {
-              continue;
-            }
-            if (!taughtSubjects.has(subjectId) && taughtSubjects.size >= maxSubjectsPerTeacher) {
-              continue;
-            }
-
-            timetable.push({
-              day,
-              period: slot.period,
-              time: `${slot.start} - ${slot.end}`,
-              subjectId: subject._id,
-              teacherId: teacher._id
+            const assignedTeacherId = subjectTeacherAssignment.get(subjectId);
+            const validTeachers = shuffle(
+              teachers.filter((teacher) =>
+                teacher.subjects.some((sub) => sub.toString() === subjectId)
+              )
+            ).filter((teacher) => {
+              const teacherId = teacher._id.toString();
+              if (assignedTeacherId && teacherId !== assignedTeacherId) return false;
+              return true;
             });
 
-            teacherSchedule.add(timeKey);
-            if (normalizeTeacherName(teacher.name)) {
-              teacherScheduleByName.add(teacherNameKey);
-            }
-            subjectCountsByDay.set(dayKey, currentDayCount + 1);
-            subjectCountsByWeek.set(subjectId, currentWeekCount + 1);
-            daySubjectSlots.set(daySubjectKey, slotIdx);
-            taughtSubjects.add(subjectId);
-            teacherSubjectMap.set(teacherId, taughtSubjects);
-            subjectTeacherAssignment.set(subjectId, teacherId);
-            if (!teacherAssignedSubjectId.has(teacherId)) {
-              teacherAssignedSubjectId.set(teacherId, subjectId);
-            }
+            for (const teacher of validTeachers) {
+              const teacherId = teacher._id.toString();
+              const assignedSubjectId = teacherAssignedSubjectId.get(teacherId);
+              if (assignedSubjectId && assignedSubjectId !== subjectId && maxSubjectsPerTeacherPerSection === 1) {
+                continue;
+              }
 
-            assigned = true;
-            break;
+              const timeKey = `${teacherId}-${day}-${slot.period}`;
+              if (teacherSchedule.has(timeKey)) continue;
+              const teacherNameKey = `${normalizeTeacherName(teacher.name)}-${day}-${slot.period}`;
+              if (normalizeTeacherName(teacher.name) && teacherScheduleByName.has(teacherNameKey)) continue;
+
+              const taughtSubjects = teacherSubjectMap.get(teacherId) || new Set();
+              if (!taughtSubjects.has(subjectId) && taughtSubjects.size >= maxSubjectsPerTeacherPerSection) {
+                continue;
+              }
+              if (!taughtSubjects.has(subjectId) && taughtSubjects.size >= maxSubjectsPerTeacher) {
+                continue;
+              }
+
+              timetable.push({
+                day,
+                period: slot.period,
+                time: `${slot.start} - ${slot.end}`,
+                subjectId: subject._id,
+                teacherId: teacher._id
+              });
+
+              teacherSchedule.add(timeKey);
+              if (normalizeTeacherName(teacher.name)) {
+                teacherScheduleByName.add(teacherNameKey);
+              }
+              subjectCountsByDay.set(dayKey, currentDayCount + 1);
+              subjectCountsByWeek.set(subjectId, currentWeekCount + 1);
+              daySubjectSlots.set(daySubjectKey, slotIdx);
+              taughtSubjects.add(subjectId);
+              teacherSubjectMap.set(teacherId, taughtSubjects);
+              subjectTeacherAssignment.set(subjectId, teacherId);
+              if (!teacherAssignedSubjectId.has(teacherId)) {
+                teacherAssignedSubjectId.set(teacherId, subjectId);
+              }
+
+              if (isFirstPeriod) {
+                firstPeriodSubjects.add(subjectId);
+              }
+
+              assigned = true;
+              return;
+            }
           }
+        };
 
-          if (assigned) break;
+        tryAssign(allowNonConsecutive, prioritizedSubjects);
+
+        if (!assigned && isFirstPeriod && prioritizedSubjects.length !== sortedSubjects.length) {
+          tryAssign(allowNonConsecutive, sortedSubjects);
+        }
+
+        if (!assigned && isFirstPeriod) {
+          tryAssign(true, sortedSubjects);
         }
 
         if (!assigned) {
